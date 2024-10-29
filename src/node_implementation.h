@@ -62,6 +62,7 @@
 #include "nmos/video_jxsv.h"
 #include "sdp/sdp.h"
 
+
 // example node implementation details
 namespace impl {
 // custom logging category for the example node implementation thread
@@ -175,8 +176,9 @@ void insert_group_hint(nmos::resource &resource, const port &port,
                        std::string &id, std::string &name);
 } // namespace impl
 
-struct node_implementation_init_exception {};
-
+struct node_implementation_init_exception : public std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 // #include "st_config_utils.h"
 namespace slog {
 class base_gate;

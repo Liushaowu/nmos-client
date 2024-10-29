@@ -752,7 +752,7 @@ Node::make_node_implementation_transport_file_parser() {
                 // validate core media types, i.e., "video/raw", "audio/L",
                 // "video/smpte291" and "video/SMPTE2022-6"
                 try {
-                  nmos::validate_sdp_parameters(receiver, sdp_params);
+                  //nmos::validate_sdp_parameters(receiver, sdp_params);
                 } catch (std::runtime_error &e) {
                   throw std::runtime_error("视频/音频 格式错误");
                 }
@@ -1048,10 +1048,10 @@ void Node::add_video_sender(VideoSender video) {
   // the sender, so insert these first
   if (!insert_resource_after(delay_millis, node_model_.node_resources,
                              std::move(source), *gate_, lock))
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
   if (!insert_resource_after(delay_millis, node_model_.node_resources,
                              std::move(flow), *gate_, lock))
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
 
   const auto manifest_href = nmos::experimental::make_manifest_api_manifest(
       sender_id, node_model_.settings);
@@ -1100,10 +1100,10 @@ void Node::add_video_sender(VideoSender video) {
                     connection_sender.data[nmos::fields::transport_file]);
   if (!insert_resource_after(delay_millis, node_model_.node_resources,
                              std::move(sender), *gate_, lock))
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
   if (!insert_resource_after(delay_millis, node_model_.connection_resources,
                              std::move(connection_sender), *gate_, lock))
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
 }
 
 void Node::add_audio_sender(AudioSender audio) {
@@ -1164,10 +1164,10 @@ void Node::add_audio_sender(AudioSender audio) {
   // sender, so insert these first
   if (!insert_resource_after(delay_millis, node_model_.node_resources,
                              std::move(source), *gate_, lock))
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
   if (!insert_resource_after(delay_millis, node_model_.node_resources,
                              std::move(flow), *gate_, lock))
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
 
   const auto manifest_href = nmos::experimental::make_manifest_api_manifest(
       sender_id, node_model_.settings);
@@ -1219,10 +1219,10 @@ void Node::add_audio_sender(AudioSender audio) {
                     connection_sender.data[nmos::fields::transport_file]);
   if (!insert_resource_after(delay_millis, node_model_.node_resources,
                              std::move(sender), *gate_, lock))
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
   if (!insert_resource_after(delay_millis, node_model_.connection_resources,
                              std::move(connection_sender), *gate_, lock))
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
 }
 
 /**
@@ -1255,7 +1255,7 @@ void Node::init_device() {
         impl::fields::node_tags(node_model_.settings);
     if (!insert_resource_after(delay_millis, node_model_.node_resources,
                                std::move(node), *gate_, lock))
-      throw node_implementation_init_exception();
+      throw node_implementation_init_exception("");
   }
 
 #ifdef HAVE_LLDP
@@ -1278,7 +1278,7 @@ void Node::init_device() {
   if (host_interfaces.end() == host_interface_) {
     slog::log<slog::severities::severe>(*gate_, SLOG_FLF)
         << "No network interface corresponding to host_address?";
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
   }
   // hmm, should probably add a custom setting to control the primary and
   // secondary interfaces for the example node's RTP senders and receivers
@@ -1302,7 +1302,7 @@ void Node::init_device() {
       host_interfaces.end() == secondary_interfaces) {
     slog::log<slog::severities::severe>(*gate_, SLOG_FLF)
         << "No network interface corresponding to one of the host_addresses?";
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
   }
   primary_interface = *primary_interfaces;
   secondary_interface = *secondary_interfaces;
@@ -1316,7 +1316,7 @@ void Node::init_device() {
         impl::fields::device_tags(node_model_.settings);
     if (!insert_resource_after(delay_millis, node_model_.node_resources,
                                std::move(device), *gate_, lock))
-      throw node_implementation_init_exception();
+      throw node_implementation_init_exception("");
   }
 }
 
@@ -1354,15 +1354,7 @@ void Node::add_video_receiver(VideoReceiver video) {
                 nmos::interlace_modes::progressive.name};
   receiver.data[nmos::fields::caps][nmos::fields::constraint_sets] = value_of(
       {value_of({{nmos::caps::format::grain_rate,
-                  nmos::make_caps_rational_constraint({frame_rate})},
-                 {nmos::caps::format::frame_width,
-                  nmos::make_caps_integer_constraint({frame_width})},
-                 {nmos::caps::format::frame_height,
-                  nmos::make_caps_integer_constraint({frame_height})},
-                 {nmos::caps::format::interlace_mode,
-                  nmos::make_caps_string_constraint(interlace_modes)},
-                 {nmos::caps::format::color_sampling,
-                  nmos::make_caps_string_constraint({sampling.name})}})});
+                  nmos::make_caps_rational_constraint({frame_rate})}})});
 
   receiver.data[nmos::fields::version] =
       receiver.data[nmos::fields::caps][nmos::fields::version] =
@@ -1390,10 +1382,10 @@ void Node::add_video_receiver(VideoReceiver video) {
 
   if (!insert_resource_after(delay_millis, node_model_.node_resources,
                              std::move(receiver), *gate_, lock))
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
   if (!insert_resource_after(delay_millis, node_model_.connection_resources,
                              std::move(connection_receiver), *gate_, lock))
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
 }
 
 void Node::add_audio_receiver(AudioReceiver audio) {
@@ -1467,11 +1459,11 @@ void Node::add_audio_receiver(AudioReceiver audio) {
 
   if (!insert_resource_after(delay_millis, node_model_.node_resources,
                              std::move(receiver), *gate_, lock)) {
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
   }
   if (!insert_resource_after(delay_millis, node_model_.connection_resources,
                              std::move(connection_receiver), *gate_, lock)) {
-    throw node_implementation_init_exception();
+    throw node_implementation_init_exception("");
   }
 }
 

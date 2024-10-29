@@ -1,5 +1,3 @@
-find_package(MTL REQUIRED)
-find_package(DPDK REQUIRED)
 find_package(nmos-cpp REQUIRED)
 
 
@@ -21,7 +19,7 @@ target_include_directories(nmos-client PUBLIC
 #     node.cpp
 # )
 
-target_link_libraries(nmos-client MTL DPDK  nmos-cpp::compile-settings
+target_link_libraries(nmos-client nmos-cpp::compile-settings
 nmos-cpp::nmos-cpp)
 #安装目标和头文件
 install(TARGETS nmos-client

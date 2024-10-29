@@ -24,13 +24,31 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <mtl/st20_api.h>
 #include <nmos/id.h>
 #include <nmos/mutex.h>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+enum st20_fmt {
+  ST20_FMT_YUV_422_10BIT = 0, /**< 10-bit YUV 4:2:2 */
+  ST20_FMT_YUV_422_8BIT,      /**< 8-bit YUV 4:2:2 */
+  ST20_FMT_YUV_422_12BIT,     /**< 12-bit YUV 4:2:2 */
+  ST20_FMT_YUV_422_16BIT,     /**< 16-bit YUV 4:2:2 */
+  ST20_FMT_YUV_420_8BIT,      /**< 8-bit YUV 4:2:0 */
+  ST20_FMT_YUV_420_10BIT,     /**< 10-bit YUV 4:2:0 */
+  ST20_FMT_YUV_420_12BIT,     /**< 12-bit YUV 4:2:0 */
+  ST20_FMT_RGB_8BIT,          /**< 8-bit RGB */
+  ST20_FMT_RGB_10BIT,         /**< 10-bit RGB */
+  ST20_FMT_RGB_12BIT,         /**< 12-bit RGB */
+  ST20_FMT_RGB_16BIT,         /**< 16-bit RGB */
+  ST20_FMT_YUV_444_8BIT,      /**< 8-bit YUV 4:4:4 */
+  ST20_FMT_YUV_444_10BIT,     /**< 10-bit YUV 4:4:4 */
+  ST20_FMT_YUV_444_12BIT,     /**< 12-bit YUV 4:4:4 */
+  ST20_FMT_YUV_444_16BIT,     /**< 16-bit YUV 4:4:4 */
+  ST20_FMT_MAX,               /**< max value of this enum */
+};
 const unsigned int delay_millis{0};
 typedef std::unordered_map<nmos::id, std::string> session_map_t;
 namespace seeder {
