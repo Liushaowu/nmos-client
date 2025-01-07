@@ -1,12 +1,11 @@
 #include "node.h"
 #include "nmos/sdp_utils.h"
 #include "node_implementation.h"
-#include <algorithm>
 #include <asm-generic/errno.h>
 #include <cpprest/json.h>
 #include <cpprest/json_ops.h>
-#include <cstddef>
 #include <functional>
+#include <nmos/capabilities.h>
 #include <nmos/id.h>
 #include <nmos/json_fields.h>
 #include <nmos/media_type.h>
@@ -216,80 +215,6 @@ int Node::nmos_node_start() {
     // implementation
     auto node_implementation = make_node_implementation();
 
-// only implement communication with OCSP server if http_listener supports OCSP
-// stapling cf. preprocessor conditions in nmos::make_http_listener_config Note:
-// the get_ocsp_response callback must be set up before executing the
-// make_node_server where make_http_listener_config is set up
-#if !defined(_WIN32) || defined(CPPREST_FORCE_HTTP_LISTENER_ASIO)
-    nmos::experimental::ocsp_state ocsp_state;
-    if (nmos::experimental::fields::server_secure(node_model_.settings)) {
-      node_implementation.on_get_ocsp_response(
-          nmos::make_ocsp_response_handler(ocsp_state, gate));
-    }
-#endif
-    // only configure communication with Authorization server if
-    // IS-10/BCP-003-02 is required Note: the validate_authorization callback
-    // must be set up before executing the make_node_server where make_node_api,
-    // make_connection_api, make_events_api, and make_channelmapping_api are set
-    // up the ws_validate_authorization callback must be set up before executing
-    // the make_node_server where make_events_ws_validate_handler is set up the
-    // get_authorization_bearer_token callback must be set up before executing
-    // the make_node_server where make_http_client_config is set up
-    nmos::experimental::authorization_state authorization_state;
-    if (nmos::experimental::fields::server_authorization(
-            node_model_.settings)) {
-      node_implementation
-          .on_validate_authorization(
-              nmos::experimental::make_validate_authorization_handler(
-                  node_model_, authorization_state,
-                  nmos::experimental::make_validate_authorization_token_handler(
-                      authorization_state, gate),
-                  gate))
-          .on_ws_validate_authorization(
-              nmos::experimental::make_ws_validate_authorization_handler(
-                  node_model_, authorization_state,
-                  nmos::experimental::make_validate_authorization_token_handler(
-                      authorization_state, gate),
-                  gate));
-    }
-    if (nmos::experimental::fields::client_authorization(
-            node_model_.settings)) {
-      node_implementation
-          .on_get_authorization_bearer_token(
-              nmos::experimental::make_get_authorization_bearer_token_handler(
-                  authorization_state, gate))
-          .on_load_authorization_clients(
-              nmos::experimental::make_load_authorization_clients_handler(
-                  node_model_.settings, gate))
-          .on_save_authorization_client(
-              nmos::experimental::make_save_authorization_client_handler(
-                  node_model_.settings, gate))
-          .on_load_rsa_private_keys(nmos::make_load_rsa_private_keys_handler(
-              node_model_.settings,
-              gate)) // may be omitted, only required for OAuth client which is
-                     // using Private Key JWT as the requested authentication
-                     // method for the token endpoint
-          .on_request_authorization_code(
-              nmos::experimental::make_request_authorization_code_handler(
-                  gate)); // may be omitted, only required for OAuth client
-                          // which is using the Authorization Code Flow to
-                          // obtain the access token
-    }
-
-    nmos::experimental::control_protocol_state control_protocol_state(nullptr);
-    if (0 <= nmos::fields::control_protocol_ws_port(node_model_.settings)) {
-      node_implementation
-          .on_get_control_class_descriptor(
-              nmos::make_get_control_protocol_class_descriptor_handler(
-                  control_protocol_state))
-          .on_get_control_datatype_descriptor(
-              nmos::make_get_control_protocol_datatype_descriptor_handler(
-                  control_protocol_state))
-          .on_get_control_protocol_method_descriptor(
-              nmos::make_get_control_protocol_method_descriptor_handler(
-                  control_protocol_state));
-    }
-
     // Set up the node server
 
     auto node_server = nmos::experimental::make_node_server(
@@ -299,104 +224,6 @@ int Node::nmos_node_start() {
     // etc.
 
     node_server.thread_functions.push_back([&] { thread_run(); });
-
-// only implement communication with OCSP server if http_listener supports OCSP
-// stapling cf. preprocessor conditions in nmos::make_http_listener_config
-#if !defined(_WIN32) || defined(CPPREST_FORCE_HTTP_LISTENER_ASIO)
-    if (nmos::experimental::fields::server_secure(node_model_.settings)) {
-      auto load_ca_certificates = node_implementation.load_ca_certificates;
-      auto load_server_certificates =
-          node_implementation.load_server_certificates;
-      node_server.thread_functions.push_back(
-          [&, load_ca_certificates, load_server_certificates] {
-            nmos::ocsp_behaviour_thread(node_model_, ocsp_state,
-                                        load_ca_certificates,
-                                        load_server_certificates, gate);
-          });
-    }
-#endif
-
-    // only configure communication with Authorization server if
-    // IS-10/BCP-003-02 is required
-    if (nmos::experimental::fields::client_authorization(
-            node_model_.settings)) {
-      std::map<nmos::host_port, web::http::experimental::listener::api_router>
-          api_routers;
-
-      // Configure the authorization_redirect API (require for Authorization
-      // Code Flow support)
-
-      if (web::http::oauth2::experimental::grant_types::authorization_code
-              .name == nmos::experimental::fields::authorization_flow(
-                           node_model_.settings)) {
-        auto load_ca_certificates = node_implementation.load_ca_certificates;
-        auto load_rsa_private_keys = node_implementation.load_rsa_private_keys;
-        api_routers[{{},
-                     nmos::experimental::fields::authorization_redirect_port(
-                         node_model_.settings)}]
-            .mount({}, nmos::experimental::make_authorization_redirect_api(
-                           node_model_, authorization_state,
-                           load_ca_certificates, load_rsa_private_keys, gate));
-      }
-
-      // Configure the jwks_uri API (require for Private Key JWK support)
-
-      if (web::http::oauth2::experimental::token_endpoint_auth_methods::
-              private_key_jwt.name ==
-          nmos::experimental::fields::token_endpoint_auth_method(
-              node_model_.settings)) {
-        auto load_rsa_private_keys = node_implementation.load_rsa_private_keys;
-        api_routers[{{},
-                     nmos::experimental::fields::jwks_uri_port(
-                         node_model_.settings)}]
-            .mount({}, nmos::experimental::make_jwk_uri_api(
-                           node_model_, load_rsa_private_keys, gate));
-      }
-
-      auto http_config = nmos::make_http_listener_config(
-          node_model_.settings, node_implementation.load_server_certificates,
-          node_implementation.load_dh_param,
-          node_implementation.get_ocsp_response, gate);
-      const auto server_secure =
-          nmos::experimental::fields::server_secure(node_model_.settings);
-      const auto hsts = nmos::experimental::get_hsts(node_model_.settings);
-      for (auto &api_router : api_routers) {
-        auto found = node_server.api_routers.find(api_router.first);
-
-        const auto &host =
-            !api_router.first.first.empty()
-                ? api_router.first.first
-                : web::http::experimental::listener::host_wildcard;
-        const auto &port = nmos::experimental::server_port(
-            api_router.first.second, node_model_.settings);
-
-        if (node_server.api_routers.end() != found) {
-          const auto uri = web::http::experimental::listener::make_listener_uri(
-              server_secure, host, port);
-          auto listener = std::find_if(
-              node_server.http_listeners.begin(),
-              node_server.http_listeners.end(),
-              [&](const web::http::experimental::listener::http_listener
-                      &listener) { return listener.uri() == uri; });
-          if (node_server.http_listeners.end() != listener) {
-            found->second
-                .pop_back(); // remove the api_finally_handler which was
-                             // previously added in the make_node_server, the
-                             // api_finally_handler will be re-inserted in the
-                             // make_api_listener
-            node_server.http_listeners.erase(listener);
-          }
-          found->second.mount({}, api_router.second);
-          node_server.http_listeners.push_back(
-              nmos::make_api_listener(server_secure, host, port, found->second,
-                                      http_config, hsts, gate));
-        } else {
-          node_server.http_listeners.push_back(nmos::make_api_listener(
-              server_secure, host, port, api_router.second, http_config, hsts,
-              gate));
-        }
-      }
-    }
 
     if (!nmos::experimental::fields::http_trace(node_model_.settings)) {
       // Disable TRACE method
@@ -683,52 +510,6 @@ Node::make_node_implementation_connection_activation_handler() {
   };
 }
 
-nmos::system_global_handler
-Node::make_node_implementation_system_global_handler() {
-  // this example uses the callback to update the settings
-  // (an 'empty' std::function disables System API node behaviour)
-  return
-      [&](const web::uri &system_uri, const web::json::value &system_global) {
-        if (!system_uri.is_empty()) {
-          slog::log<slog::severities::info>(*gate_, SLOG_FLF)
-              << nmos::stash_category(impl::categories::node_implementation)
-              << "New system global configuration discovered from the System "
-                 "API at: "
-              << system_uri.to_string();
-
-          // although this example immediately updates the settings, the effect
-          // is not propagated in either Registration API behaviour or the
-          // senders' /transportfile endpoints until an update to these is
-          // forced by other circumstances
-
-          auto system_global_settings =
-              nmos::parse_system_global_data(system_global).second;
-          web::json::merge_patch(node_model_.settings, system_global_settings,
-                                 true);
-        } else {
-          slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
-              << nmos::stash_category(impl::categories::node_implementation)
-              << "System global configuration is not discoverable";
-        }
-      };
-}
-
-nmos::registration_handler
-Node::make_node_implementation_registration_handler() {
-  return [&](const web::uri &registration_uri) {
-    if (!registration_uri.is_empty()) {
-      slog::log<slog::severities::info>(*gate_, SLOG_FLF)
-          << nmos::stash_category(impl::categories::node_implementation)
-          << "Started registered operation with Registration API at: "
-          << registration_uri.to_string();
-    } else {
-      slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
-          << nmos::stash_category(impl::categories::node_implementation)
-          << "Stopped registered operation";
-    }
-  };
-}
-
 // Example Connection API callback to parse "transport_file" during a PATCH
 // /staged request
 nmos::transport_file_parser
@@ -752,7 +533,7 @@ Node::make_node_implementation_transport_file_parser() {
                 // validate core media types, i.e., "video/raw", "audio/L",
                 // "video/smpte291" and "video/SMPTE2022-6"
                 try {
-                  //nmos::validate_sdp_parameters(receiver, sdp_params);
+                  nmos::validate_sdp_parameters(receiver, sdp_params);
                 } catch (std::runtime_error &e) {
                   throw std::runtime_error("视频/音频 格式错误");
                 }
@@ -777,8 +558,8 @@ Node::make_node_implementation_auto_resolver(const nmos::settings &settings) {
     const std::pair<nmos::id, nmos::type> id_type{connection_resource.id,
                                                   connection_resource.type};
 
-    // "In some cases the behaviour is more complex, and may be determined by
-    // the vendor." See
+    // "In some cases the behaviour is more complex, and may be determined
+    // by the vendor." See
     // https://specs.amwa.tv/is-05/releases/v1.0.0/docs/2.2._APIs_-_Server_Side_Implementation.html#use-of-auto
     bool smpte2022_7 = false;
     std::string source_ip = "";
@@ -792,13 +573,6 @@ Node::make_node_implementation_auto_resolver(const nmos::settings &settings) {
           sender_video_session_map_.find(connection_resource.id);
 
       if (video_session != sender_video_session_map_.end()) {
-        // for (st_json_video_session_t session :
-        //      ctx_->json_ctx->tx_video_sessions) {
-        //   if (session.base.id == video_session->second) {
-        //     st_json_sender = session.base;
-        //     break;
-        //   }
-        // }
         VideoSender video = video_session->second;
         if (setting_video_sender_func) {
           setting_video_sender_func(&video);
@@ -808,7 +582,9 @@ Node::make_node_implementation_auto_resolver(const nmos::settings &settings) {
           redudancy_ip = video.redudancy.ip;
           port = video.port;
         } else {
-          // not found function
+          slog::log<slog::severities::error>(*gate_, SLOG_FLF)
+              << nmos::stash_category(impl::categories::node_implementation)
+              << "Not Found Setting Video Sender Function";
         }
       }
       auto audio_session =
@@ -823,7 +599,9 @@ Node::make_node_implementation_auto_resolver(const nmos::settings &settings) {
           redudancy_ip = audio.redudancy.ip;
           port = audio.port;
         } else {
-          // not found function
+          slog::log<slog::severities::error>(*gate_, SLOG_FLF)
+              << nmos::stash_category(impl::categories::node_implementation)
+              << "Not Found Setting Audio Sender Function";
         }
       }
       nmos::details::resolve_auto(transport_params[0], nmos::fields::source_ip,
@@ -859,6 +637,9 @@ Node::make_node_implementation_auto_resolver(const nmos::settings &settings) {
           ip = video.ip;
           redudancy_ip = video.redudancy.ip;
         } else {
+          slog::log<slog::severities::error>(*gate_, SLOG_FLF)
+              << nmos::stash_category(impl::categories::node_implementation)
+              << "Not Found Setting Video Revicver Function";
           // not found function
         }
       }
@@ -872,6 +653,9 @@ Node::make_node_implementation_auto_resolver(const nmos::settings &settings) {
           ip = audio.ip;
           redudancy_ip = audio.redudancy.ip;
         } else {
+          slog::log<slog::severities::error>(*gate_, SLOG_FLF)
+              << nmos::stash_category(impl::categories::node_implementation)
+              << "Not Found Setting Audio Revicver Function";
           // not found function
         }
       }
@@ -1030,7 +814,6 @@ void Node::add_video_sender(VideoSender video) {
       source_id, device_id_, nmos::clock_names::clk0, frame_rate,
       node_model_.settings); // 底层使用了 label 和 description 字段
 
-  // impl::insert_parents(source, seed_id_, impl::ports::video, index);
   impl::set_label_description(source, impl::ports::video, name);
   nmos::interlace_mode interlace_mode =
       get_interlace_mode(video.fps, video.height);
@@ -1041,11 +824,10 @@ void Node::add_video_sender(VideoSender video) {
                                    colorspace, transfer_characteristic,
                                    sampling, bit_depth, node_model_.settings);
 
-  // impl::insert_parents(flow, seed_id_, impl::ports::video, index);
   impl::set_label_description(flow, impl::ports::video, name);
 
-  // set_transportfile needs to find the matching source and flow for
-  // the sender, so insert these first
+  // set_transportfile needs to find the matching source and flow for the
+  // sender, so insert these first
   if (!insert_resource_after(delay_millis, node_model_.node_resources,
                              std::move(source), *gate_, lock))
     throw node_implementation_init_exception("");
@@ -1067,7 +849,7 @@ void Node::add_video_sender(VideoSender video) {
 
   auto connection_sender =
       nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
-  // add some example constraints; these should be completed fully!
+  // add constraints;
   connection_sender
       .data[nmos::fields::endpoint_constraints][0][nmos::fields::source_ip] =
       value_of({{nmos::fields::constraint_enum,
@@ -1080,7 +862,6 @@ void Node::add_video_sender(VideoSender video) {
 
   if (video.enable) {
     // initialize this sender with a scheduled activation, e.g. to
-    // enable the IS-05-01 test suite to run immediately
     auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
     staged[nmos::fields::master_enable] = value::boolean(true);
     staged[nmos::fields::activation] =
@@ -1129,21 +910,6 @@ void Node::add_audio_sender(AudioSender audio) {
       }));
 
   int bit_depth = audio.bit_depth;
-  // if (session->info.audio_format == ST30_FMT_PCM24)
-  // {
-  //   bit_depth = 24;
-  // }
-  // else if (session->info.audio_format == ST30_FMT_PCM8)
-  // {
-  //   bit_depth = 8;
-  // }
-  // else if (session->info.audio_format == ST31_FMT_AM824)
-  // {
-  //   bit_depth = 32;
-  // }
-
-  // st30_get_sample_num(enum st30_ptime ptime, enum st30_sampling sampling)
-  // int simple_rate = st30_get_sample_rate(session->info.audio_sampling);
   int simple_rate = audio.simple_rate;
   nmos::resource source =
       nmos::make_audio_source(source_id, device_id_, nmos::clock_names::clk0,
@@ -1185,7 +951,7 @@ void Node::add_audio_sender(AudioSender audio) {
 
   auto connection_sender =
       nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
-  // add some example constraints; these should be completed fully!
+  // add constraints;
   connection_sender
       .data[nmos::fields::endpoint_constraints][0][nmos::fields::source_ip] =
       value_of({{nmos::fields::constraint_enum,
@@ -1198,7 +964,6 @@ void Node::add_audio_sender(AudioSender audio) {
 
   if (audio.enable) {
     // initialize this sender with a scheduled activation, e.g. to enable the
-    // IS-05-01 test suite to run immediately
     auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
     staged[nmos::fields::master_enable] = value::boolean(true);
     staged[nmos::fields::activation] =
@@ -1354,7 +1119,15 @@ void Node::add_video_receiver(VideoReceiver video) {
                 nmos::interlace_modes::progressive.name};
   receiver.data[nmos::fields::caps][nmos::fields::constraint_sets] = value_of(
       {value_of({{nmos::caps::format::grain_rate,
-                  nmos::make_caps_rational_constraint({frame_rate})}})});
+                  nmos::make_caps_rational_constraint({frame_rate})},
+                 {nmos::caps::format::frame_width,
+                  nmos::make_caps_integer_constraint({frame_width})},
+                 {nmos::caps::format::frame_height,
+                  nmos::make_caps_integer_constraint({frame_height})},
+                 {nmos::caps::format::interlace_mode,
+                  nmos::make_caps_string_constraint(interlace_modes)},
+                 {nmos::caps::format::color_sampling,
+                  nmos::make_caps_string_constraint({sampling.name})}})});
 
   receiver.data[nmos::fields::version] =
       receiver.data[nmos::fields::caps][nmos::fields::version] =

@@ -147,8 +147,6 @@ private:
                              nmos::resources &resources, nmos::id id,
                              slog::base_gate &gate, nmos::write_lock &lock);
   nmos::experimental::node_implementation make_node_implementation();
-  nmos::system_global_handler make_node_implementation_system_global_handler();
-  nmos::registration_handler make_node_implementation_registration_handler();
   nmos::transport_file_parser make_node_implementation_transport_file_parser();
   nmos::connection_activation_handler
   make_node_implementation_connection_activation_handler();

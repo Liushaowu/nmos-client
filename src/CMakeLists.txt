@@ -21,7 +21,7 @@ target_include_directories(nmos-client PUBLIC
 
 target_link_libraries(nmos-client nmos-cpp::compile-settings
 nmos-cpp::nmos-cpp)
-#安装目标和头文件
+# #安装目标和头文件
 install(TARGETS nmos-client
         EXPORT nmos-clientConfig
         LIBRARY DESTINATION lib
