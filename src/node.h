@@ -61,10 +61,13 @@ struct Redudancy {
 };
 
 struct VideoSender {
+  double fps;
   std::string id;
   std::string name;
   bool enable = false;
-  double fps;
+  bool interlace = false;
+  int fps_numerator =50000 ;
+  int fps_denominator = 1000;
   int width;
   int height;
   std::string source_ip;
@@ -76,6 +79,8 @@ struct VideoSender {
 
 struct AudioSender {
   double fps;
+  int fps_numerator =50000 ;
+  int fps_denominator = 1000;
   std::string id;
   std::string name;
   std::string source_ip;
@@ -88,10 +93,13 @@ struct AudioSender {
   Redudancy redudancy;
 };
 struct VideoReceiver {
+  double fps;
   std::string id;
   std::string name;
+  bool interlace = false;
   bool enable = false;
-  double fps;
+  int fps_numerator =50000 ;
+  int fps_denominator = 1000;
   int width;
   int height;
   std::string source_ip;
@@ -102,6 +110,8 @@ struct VideoReceiver {
 };
 struct AudioReceiver {
   double fps;
+  int fps_numerator =50000 ;
+  int fps_denominator = 1000;
   std::string id;
   std::string name;
   bool enable = false;

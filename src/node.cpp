@@ -7,6 +7,7 @@
 #include <functional>
 #include <nmos/capabilities.h>
 #include <nmos/id.h>
+#include <nmos/interlace_mode.h>
 #include <nmos/json_fields.h>
 #include <nmos/media_type.h>
 #include <nmos/mutex.h>
@@ -98,9 +99,11 @@ int st_get_component_depth(st20_fmt fmt) {
   return 8;
 }
 
-nmos::interlace_mode get_interlace_mode(double fps, int height) {
-  const auto frame_rate = nmos::parse_rational(web::json::value_of(
-      {{nmos::fields::numerator, fps}, {nmos::fields::denominator, 1}}));
+nmos::interlace_mode get_interlace_mode(int fps_numerator, int fps_denominator,
+                                        int height) {
+  const auto frame_rate = nmos::parse_rational(
+      web::json::value_of({{nmos::fields::numerator, fps_numerator},
+                           {nmos::fields::denominator, fps_denominator}}));
   const auto frame_height = height;
   return (nmos::rates::rate25 == frame_rate ||
           nmos::rates::rate29_97 == frame_rate) &&
@@ -800,8 +803,9 @@ void Node::add_video_sender(VideoSender video) {
   const auto sender_id =
       impl::make_id(seed_id_, nmos::types::sender, impl::ports::video, id);
   bool ST_2022_7 = video.redudancy.enable;
-  nmos::rational frame_rate = nmos::parse_rational(web::json::value_of(
-      {{nmos::fields::numerator, video.fps}, {nmos::fields::denominator, 1}}));
+  nmos::rational frame_rate = nmos::parse_rational(
+      web::json::value_of({{nmos::fields::numerator, video.fps_numerator},
+                           {nmos::fields::denominator, video.fps_numerator}}));
   const auto frame_width = video.width;
   const auto frame_height = video.height;
   if (frame_width == 3840 &&
@@ -815,9 +819,8 @@ void Node::add_video_sender(VideoSender video) {
       node_model_.settings); // 底层使用了 label 和 description 字段
 
   impl::set_label_description(source, impl::ports::video, name);
-  nmos::interlace_mode interlace_mode =
-      get_interlace_mode(video.fps, video.height);
-
+  nmos::interlace_mode interlace_mode = video.interlace?nmos::interlace_modes::interlaced_tff:nmos::interlace_modes::progressive;
+  
   nmos::resource flow;
   flow = nmos::make_raw_video_flow(flow_id, source_id, device_id_, frame_rate,
                                    frame_width, frame_height, interlace_mode,
@@ -891,7 +894,8 @@ void Node::add_audio_sender(AudioSender audio) {
   nmos::write_lock lock = node_model_.write_lock();
 
   nmos::rational frame_rate = nmos::parse_rational(web::json::value_of(
-      {{nmos::fields::numerator, audio.fps}, {nmos::fields::denominator, 1}}));
+      {{nmos::fields::numerator, audio.fps_numerator},
+       {nmos::fields::denominator, audio.fps_denominator}}));
   ;
   std::string id = audio.id;
   std::string name = audio.name;
@@ -1091,7 +1095,8 @@ void Node::add_video_receiver(VideoReceiver video) {
   std::string name = video.name;
   bool ST_2022_7 = video.redudancy.enable;
   nmos::rational frame_rate = nmos::parse_rational(web::json::value_of(
-      {{nmos::fields::numerator, video.fps}, {nmos::fields::denominator, 1}}));
+      {{nmos::fields::numerator, video.fps_numerator},
+       {nmos::fields::denominator, video.fps_denominator}}));
   const auto frame_width = video.width;
   const auto frame_height = video.height;
   const auto sampling = st_get_color_sampling(video.pg_format);
@@ -1106,11 +1111,8 @@ void Node::add_video_receiver(VideoReceiver video) {
       nmos::make_receiver(receiver_id, device_id_, nmos::transports::rtp,
                           interface_names, nmos::formats::video,
                           {nmos::media_types::video_raw}, node_model_.settings);
-  nmos::interlace_mode interlace_mode =
-      get_interlace_mode(video.fps, video.height);
-  // add an example constraint set; these should be completed fully!
   const auto interlace_modes =
-      nmos::interlace_modes::progressive != interlace_mode
+      video.interlace
           ? std::vector<
                 utility::string_t>{nmos::interlace_modes::interlaced_bff.name,
                                    nmos::interlace_modes::interlaced_tff.name,

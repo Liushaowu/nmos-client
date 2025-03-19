@@ -5,7 +5,7 @@ find_package(nmos-cpp REQUIRED)
 add_library(nmos-client STATIC node_implementation.cpp node.cpp)
 
 
-# 设置库的公共头文件目录
+#设置库的公共头文件目录
 target_include_directories(nmos-client PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:include>
@@ -21,7 +21,7 @@ target_include_directories(nmos-client PUBLIC
 
 target_link_libraries(nmos-client nmos-cpp::compile-settings
 nmos-cpp::nmos-cpp)
-# #安装目标和头文件
+#安装目标和头文件
 install(TARGETS nmos-client
         EXPORT nmos-clientConfig
         LIBRARY DESTINATION lib
