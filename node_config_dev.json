@@ -1,0 +1,80 @@
+{
+    "http_port": 1080,
+    "seed_id": "717ef3f9-c0c0-4445-b3aa-3327459a0e73",
+    "domain": "local",
+    "node_tags": {
+        "urn:x-nmos:tag:asset:product/v1.0": [
+            "NMOS Client"
+        ],
+        "urn:x-nmos:tag:asset:manufacturer/v1.0": [
+            "SEEDER"
+        ],
+        "urn:x-nmos:tag:asset:instance-id/v1.0": [
+            "717ef3f9-c0c0-4445-b3aa-3327459a0e73"
+        ]
+    },
+    "device_tags": {
+        "urn:x-nmos:tag:asset:product/v1.0": [
+            "NMOS Client"
+        ],
+        "urn:x-nmos:tag:asset:manufacturer/v1.0": [
+            "SEEDER"
+        ],
+        "urn:x-nmos:tag:asset:instance-id/v1.0": [
+            "717ef3f9-c0c0-4445-b3aa-3327459a0e73"
+        ]
+    },
+    "activate_senders": true,
+    "colorspace": "BT709",
+    "transfer_characteristic": "SDR",
+    "color_sampling": "YCbCr-4:2:2",
+    "video_type": "video/raw",
+    "is04_versions": [
+        "v1.0",
+        "v1.1",
+        "v1.2",
+        "v1.3"
+    ],
+    "is05_versions": [
+        "v1.0",
+        "v1.1"
+    ],
+    "is07_versions": [
+        "v1.0"
+    ],
+    "is08_versions": [
+        "v1.0"
+    ],
+    "is09_versions": [
+        "v1.0"
+    ],
+    "is10_versions": [
+        "v1.0"
+    ],
+    "is12_versions": [
+        "v1.0"
+    ],
+    "pri": 100,
+    "highest_pri": 0,
+    "lowest_pri": 2147483647,
+    "authorization_highest_pri": 0,
+    "authorization_lowest_pri": 2147483647,
+    "discovery_backoff_min": 1,
+    "discovery_backoff_max": 30,
+    "discovery_backoff_factor": 1.5,
+    "service_name_prefix": "SEEDER",
+    "registry_version": "v1.2",
+    "listen_backlog": 0,
+    "registration_heartbeat_interval": 5,
+    "registration_request_max": 30,
+    "registration_heartbeat_max": 5,
+    "immediate_activation_max": 30,
+    "events_heartbeat_interval": 5,
+    "events_expiry_interval": 12,
+    "label": "NMOS Client",
+    "description": "NMOS Client",
+    "no_trailing_dot_for_authorization_callback_uri": true,
+    "service_unavailable_retry_after": 5,
+    "manufacturer_name": "SEEDER",
+    "host_addresses":["192.168.123.195"]
+}

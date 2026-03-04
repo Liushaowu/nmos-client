@@ -88,13 +88,13 @@ void set_label_description(nmos::resource &resource, const impl::port &port,
   auto label = nmos::fields::label(resource.data);
   if (!label.empty())
     label += U('/');
-  label += resource.type.name + U('/') + port.name + "_" + name;
+  label += resource.type.name + U('/') + port.name + U('/') + name;
   resource.data[nmos::fields::label] = value::string(label);
 
   auto description = nmos::fields::description(resource.data);
   if (!description.empty())
     description += U('/');
-  description += resource.type.name + U('/') + port.name + "_" + name;
+  description += resource.type.name + U('/') + port.name + U('/') + name;
   resource.data[nmos::fields::description] = value::string(description);
 }
 

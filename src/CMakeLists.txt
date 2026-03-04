@@ -21,7 +21,7 @@ target_include_directories(nmos-client PUBLIC
 
 target_link_libraries(nmos-client nmos-cpp::compile-settings
 nmos-cpp::nmos-cpp)
-#安装目标和头文件
+# 安装目标和头文件
 install(TARGETS nmos-client
         EXPORT nmos-clientConfig
         LIBRARY DESTINATION lib
@@ -29,7 +29,7 @@ install(TARGETS nmos-client
         RUNTIME DESTINATION bin)
         install(FILES node.h node_implementation.h DESTINATION include)
 
-        # 导出配置文件
+        #导出配置文件
 install(EXPORT nmos-clientConfig
 FILE nmos-clientConfig.cmake
 DESTINATION lib/cmake/nmos-client)
