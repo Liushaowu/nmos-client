@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+
+systemctl daemon-reload
+systemctl enable nmos-daemon.service || true
+systemctl restart nmos-daemon.service || systemctl start nmos-daemon.service || true
+
+exit 0

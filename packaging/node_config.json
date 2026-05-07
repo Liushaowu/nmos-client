@@ -1,9 +1,9 @@
 {
     "http_port": 2080,
-    "configuration_port":-1,
-    "events_port":-1,
-    "control_protocol_ws_port":-1,
-    "channelmapping_port":-1,
+    "configuration_port": -1,
+    "events_port": -1,
+    "control_protocol_ws_port": -1,
+    "channelmapping_port": -1,
     "seed_id": "717ef3f9-c0c0-4445-b3aa-3327459a0e73",
     "domain": "local.",
     "node_tags": {
@@ -33,31 +33,13 @@
     "transfer_characteristic": "SDR",
     "color_sampling": "YCbCr-4:2:2",
     "video_type": "video/raw",
-    "is04_versions": [
-        "v1.0",
-        "v1.1",
-        "v1.2",
-        "v1.3"
-    ],
-    "is05_versions": [
-        "v1.0",
-        "v1.1"
-    ],
-    "is07_versions": [
-        "v1.0"
-    ],
-    "is08_versions": [
-        "v1.0"
-    ],
-    "is09_versions": [
-        "v1.0"
-    ],
-    "is10_versions": [
-        "v1.0"
-    ],
-    "is12_versions": [
-        "v1.0"
-    ],
+    "is04_versions": ["v1.0", "v1.1", "v1.2", "v1.3"],
+    "is05_versions": ["v1.0", "v1.1"],
+    "is07_versions": ["v1.0"],
+    "is08_versions": ["v1.0"],
+    "is09_versions": ["v1.0"],
+    "is10_versions": ["v1.0"],
+    "is12_versions": ["v1.0"],
     "pri": 100,
     "highest_pri": 0,
     "lowest_pri": 2147483647,
@@ -80,7 +62,7 @@
     "no_trailing_dot_for_authorization_callback_uri": true,
     "service_unavailable_retry_after": 5,
     "manufacturer_name": "SEEDER",
-    "host_addresses":["192.168.123.195"],
+    "host_addresses": ["192.168.123.195"],
     "registry_address": "192.168.123.195",
-    "registry_port":3210
+    "registry_port": 3210
 }

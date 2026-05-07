@@ -98,12 +98,14 @@ void set_label_description(nmos::resource &resource, const impl::port &port,
   resource.data[nmos::fields::description] = value::string(description);
 }
 
-// add an example "natural grouping" hint to a sender or receiver
 void insert_group_hint(nmos::resource &resource, const impl::port &port,
                        std::string &id, std::string& name) {
+  const auto group_name = utility::s2us(name);
+  const auto role_in_group =
+      resource.type.name + U('/') + port.name + U('/') + utility::s2us(id);
   web::json::push_back(
       resource.data[nmos::fields::tags][nmos::fields::group_hint],
       nmos::make_group_hint(
-          {U(name), resource.type.name + U(' ') + port.name + id}));
+          {group_name, role_in_group, nmos::group_scopes::device}));
 }
 } // namespace impl

@@ -1,0 +1,825 @@
+#include "dto.h"
+
+#include <cpprest/details/basic_types.h>
+
+#include <stdexcept>
+
+using web::json::value;
+
+namespace
+{
+
+  utility::string_t to_t(const std::string &value)
+  {
+    return utility::conversions::to_string_t(value);
+  }
+
+  std::string to_utf8(const utility::string_t &value)
+  {
+    return utility::conversions::to_utf8string(value);
+  }
+
+  void require_field(const value &object, const utility::string_t &name)
+  {
+    if (!object.is_object() || !object.has_field(name))
+    {
+      throw std::runtime_error("missing required field: " + to_utf8(name));
+    }
+  }
+
+  std::string get_string_or(const value &object, const char *name,
+                            const std::string &fallback = {})
+  {
+    const auto field = to_t(name);
+    if (!object.is_object() || !object.has_field(field) ||
+        object.at(field).is_null())
+    {
+      return fallback;
+    }
+    return to_utf8(object.at(field).as_string());
+  }
+
+  bool get_bool_or(const value &object, const char *name, bool fallback = false)
+  {
+    const auto field = to_t(name);
+    if (!object.is_object() || !object.has_field(field) ||
+        object.at(field).is_null())
+    {
+      return fallback;
+    }
+    const auto &raw = object.at(field);
+    if (raw.is_boolean())
+    {
+      return raw.as_bool();
+    }
+    if (raw.is_integer())
+    {
+      return 0 != raw.as_integer();
+    }
+    return raw.as_bool();
+  }
+
+  int get_int_or(const value &object, const char *name, int fallback = 0)
+  {
+    const auto field = to_t(name);
+    if (!object.is_object() || !object.has_field(field) ||
+        object.at(field).is_null())
+    {
+      return fallback;
+    }
+    return object.at(field).as_integer();
+  }
+
+  std::int64_t get_int64_or(const value &object, const char *name,
+                            std::int64_t fallback = 0)
+  {
+    const auto field = to_t(name);
+    if (!object.is_object() || !object.has_field(field) ||
+        object.at(field).is_null())
+    {
+      return fallback;
+    }
+    return object.at(field).as_number().to_int64();
+  }
+
+  double get_double_or(const value &object, const char *name,
+                       double fallback = 0.0)
+  {
+    const auto field = to_t(name);
+    if (!object.is_object() || !object.has_field(field) ||
+        object.at(field).is_null())
+    {
+      return fallback;
+    }
+    return object.at(field).as_double();
+  }
+
+  value json_string(const std::string &text) { return value::string(to_t(text)); }
+
+  std::vector<std::string> string_vector_from_json(const value &object,
+                                                   const char *name)
+  {
+    const auto field = to_t(name);
+    if (!object.is_object() || !object.has_field(field) ||
+        object.at(field).is_null() || !object.at(field).is_array())
+    {
+      return {};
+    }
+
+    std::vector<std::string> items;
+    for (const auto &item : object.at(field).as_array())
+    {
+      if (!item.is_null())
+      {
+        items.push_back(to_utf8(item.as_string()));
+      }
+    }
+    return items;
+  }
+
+  value string_vector_to_json(const std::vector<std::string> &items)
+  {
+    value array = value::array();
+    for (std::size_t index = 0; index < items.size(); ++index)
+    {
+      array[index] = json_string(items[index]);
+    }
+    return array;
+  }
+
+  seeder::nmos_sync::PtpClockDto::Entry ptp_entry_from_json(const value &object)
+  {
+    seeder::nmos_sync::PtpClockDto::Entry entry;
+    entry.clock_accuracy = get_int_or(object, "clock_accuracy", 0);
+    entry.clock_class = get_int_or(object, "clock_class", 0);
+    entry.grandmaster_identity = get_string_or(object, "grandmaster_identity");
+    entry.grandmaster_priority1 = get_int_or(object, "grandmaster_priority1", 0);
+    entry.grandmaster_priority2 = get_int_or(object, "grandmaster_priority2", 0);
+    entry.is_active = get_bool_or(object, "is_active", false);
+    entry.is_connected = get_bool_or(object, "is_connected", false);
+    entry.is_locked = get_bool_or(object, "is_locked", false);
+    entry.master_initialized = get_bool_or(object, "master_initialized", false);
+    entry.master_port_id = get_string_or(object, "master_port_id");
+    entry.master_utc_offset = get_int_or(object, "master_utc_offset", 0);
+    entry.offset = get_double_or(object, "offset", 0.0);
+    entry.offset_scaled_log_variance =
+        get_int_or(object, "offset_scaled_log_variance", 0);
+    entry.t1_domain_number = get_int_or(object, "t1_domain_number", 0);
+    return entry;
+  }
+
+  value ptp_entry_to_json(const seeder::nmos_sync::PtpClockDto::Entry &entry)
+  {
+    value object = value::object();
+    object[to_t("clock_accuracy")] = value::number(entry.clock_accuracy);
+    object[to_t("clock_class")] = value::number(entry.clock_class);
+    object[to_t("grandmaster_identity")] =
+        json_string(entry.grandmaster_identity);
+    object[to_t("grandmaster_priority1")] =
+        value::number(entry.grandmaster_priority1);
+    object[to_t("grandmaster_priority2")] =
+        value::number(entry.grandmaster_priority2);
+    object[to_t("is_active")] = value::boolean(entry.is_active);
+    object[to_t("is_connected")] = value::boolean(entry.is_connected);
+    object[to_t("is_locked")] = value::boolean(entry.is_locked);
+    object[to_t("master_initialized")] =
+        value::boolean(entry.master_initialized);
+    object[to_t("master_port_id")] = json_string(entry.master_port_id);
+    object[to_t("master_utc_offset")] = value::number(entry.master_utc_offset);
+    object[to_t("offset")] = value::number(entry.offset);
+    object[to_t("offset_scaled_log_variance")] =
+        value::number(entry.offset_scaled_log_variance);
+    object[to_t("t1_domain_number")] = value::number(entry.t1_domain_number);
+    return object;
+  }
+
+  std::vector<seeder::nmos_sync::PtpClockDto::Entry> ptp_entries_from_json(const value &value)
+  {
+    std::vector<seeder::nmos_sync::PtpClockDto::Entry> entries;
+    if (value.is_array())
+    {
+      for (const auto &item : value.as_array())
+      {
+        if (item.is_object())
+        {
+          entries.push_back(ptp_entry_from_json(item));
+        }
+      }
+      return entries;
+    }
+
+    if (value.is_object() && value.has_field(to_t("entries")) &&
+        value.at(to_t("entries")).is_array())
+    {
+      for (const auto &item : value.at(to_t("entries")).as_array())
+      {
+        if (item.is_object())
+        {
+          entries.push_back(ptp_entry_from_json(item));
+        }
+      }
+      return entries;
+    }
+
+    if (value.is_object())
+    {
+      const auto gmid = get_string_or(value, "gmid");
+      if (!gmid.empty() || value.has_field(to_t("locked")))
+      {
+        seeder::nmos_sync::PtpClockDto::Entry entry;
+        entry.grandmaster_identity = gmid;
+        entry.is_locked = get_bool_or(value, "locked", false);
+        entry.is_active = true;
+        entry.is_connected = true;
+        entry.master_initialized = true;
+        entries.push_back(entry);
+      }
+    }
+
+    return entries;
+  }
+
+  value ptp_entries_to_json(const std::vector<seeder::nmos_sync::PtpClockDto::Entry> &entries)
+  {
+    value array = value::array();
+    for (std::size_t index = 0; index < entries.size(); ++index)
+    {
+      array[index] = ptp_entry_to_json(entries[index]);
+    }
+    return array;
+  }
+
+  seeder::nmos_sync::SnapshotDto::DeviceDto device_from_json(const value &object)
+  {
+    seeder::nmos_sync::SnapshotDto::DeviceDto device;
+    device.device = get_string_or(object, "device");
+    device.display_name = get_string_or(object, "display_name");
+    device.enable = get_bool_or(object, "enable", false);
+    device.id = get_int_or(object, "id", 0);
+    device.sip = get_string_or(object, "sip");
+    return device;
+  }
+
+  value device_to_json(const seeder::nmos_sync::SnapshotDto::DeviceDto &device)
+  {
+    value object = value::object();
+    object[to_t("device")] = json_string(device.device);
+    object[to_t("display_name")] = json_string(device.display_name);
+    object[to_t("enable")] = value::boolean(device.enable);
+    object[to_t("id")] = value::number(device.id);
+    object[to_t("sip")] = json_string(device.sip);
+    return object;
+  }
+
+  template <typename T>
+  value vector_to_json(const std::vector<T> &items,
+                       value (*mapper)(const T &item))
+  {
+    value array = value::array();
+    for (std::size_t index = 0; index < items.size(); ++index)
+    {
+      array[index] = mapper(items[index]);
+    }
+    return array;
+  }
+
+  seeder::nmos_node::Redudancy redudancy_from_json(const value &object)
+  {
+    seeder::nmos_node::Redudancy redudancy;
+    redudancy.enable = get_bool_or(object, "enable", false);
+    redudancy.ip = get_string_or(object, "ip");
+    redudancy.port = get_int_or(object, "port", 0);
+    return redudancy;
+  }
+
+  value redudancy_to_json(const seeder::nmos_node::Redudancy &redudancy)
+  {
+    value object = value::object();
+    object[to_t("enable")] = value::boolean(redudancy.enable);
+    object[to_t("ip")] = json_string(redudancy.ip);
+    object[to_t("port")] = value::number(redudancy.port);
+    return object;
+  }
+
+  seeder::nmos_node::VideoSender video_sender_from_json(const value &object)
+  {
+    seeder::nmos_node::VideoSender sender;
+    sender.id = get_string_or(object, "id");
+    sender.name = get_string_or(object, "name");
+    sender.enable = get_bool_or(object, "enable", false);
+    sender.video_format = get_string_or(object, "video_format");
+    sender.source_ip = get_string_or(object, "source_ip");
+    sender.ip = get_string_or(object, "ip");
+    sender.port = get_int_or(object, "port", 0);
+    sender.pg_format = get_int_or(object, "pg_format", 0);
+    if (object.has_field(to_t("redudancy")))
+    {
+      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+    }
+    return sender;
+  }
+
+  value video_sender_to_json(const seeder::nmos_node::VideoSender &sender)
+  {
+    value object = value::object();
+    object[to_t("id")] = json_string(sender.id);
+    object[to_t("sender_id")] = json_string(sender.sender_id);
+    object[to_t("name")] = json_string(sender.name);
+    object[to_t("enable")] = value::boolean(sender.enable);
+    object[to_t("video_format")] = json_string(sender.video_format);
+    object[to_t("source_ip")] = json_string(sender.source_ip);
+    object[to_t("ip")] = json_string(sender.ip);
+    object[to_t("port")] = value::number(sender.port);
+    object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+    object[to_t("pg_format")] = value::number(sender.pg_format);
+    return object;
+  }
+
+  seeder::nmos_node::AudioSender audio_sender_from_json(const value &object)
+  {
+    seeder::nmos_node::AudioSender sender;
+    sender.id = get_string_or(object, "id");
+    sender.name = get_string_or(object, "name");
+    sender.enable = get_bool_or(object, "enable", false);
+    sender.channel_count = get_int_or(object, "channel_count", 0);
+    sender.bit_depth = get_int_or(object, "bit_depth", 0);
+    sender.simple_rate = get_int_or(object, "simple_rate", 0);
+    sender.source_ip = get_string_or(object, "source_ip");
+    sender.ip = get_string_or(object, "ip");
+    sender.port = get_int_or(object, "port", 0);
+    if (object.has_field(to_t("redudancy")))
+    {
+      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+    }
+    return sender;
+  }
+
+  value audio_sender_to_json(const seeder::nmos_node::AudioSender &sender)
+  {
+    value object = value::object();
+    object[to_t("id")] = json_string(sender.id);
+    object[to_t("sender_id")] = json_string(sender.sender_id);
+    object[to_t("name")] = json_string(sender.name);
+    object[to_t("enable")] = value::boolean(sender.enable);
+    object[to_t("channel_count")] = value::number(sender.channel_count);
+    object[to_t("bit_depth")] = value::number(sender.bit_depth);
+    object[to_t("simple_rate")] = value::number(sender.simple_rate);
+    object[to_t("source_ip")] = json_string(sender.source_ip);
+    object[to_t("ip")] = json_string(sender.ip);
+    object[to_t("port")] = value::number(sender.port);
+    object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+    return object;
+  }
+
+  seeder::nmos_node::AncillarySender ancillary_sender_from_json(const value &object)
+  {
+    seeder::nmos_node::AncillarySender sender;
+    sender.id = get_string_or(object, "id");
+    sender.name = get_string_or(object, "name");
+    sender.format = get_string_or(object, "format");
+    sender.enable = get_bool_or(object, "enable", false);
+    sender.source_ip = get_string_or(object, "source_ip");
+    sender.ip = get_string_or(object, "ip");
+    sender.port = get_int_or(object, "port", 0);
+    if (object.has_field(to_t("redudancy")))
+    {
+      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+    }
+    return sender;
+  }
+
+  value ancillary_sender_to_json(
+      const seeder::nmos_node::AncillarySender &sender)
+  {
+    value object = value::object();
+    object[to_t("id")] = json_string(sender.id);
+    object[to_t("sender_id")] = json_string(sender.sender_id);
+    object[to_t("name")] = json_string(sender.name);
+    object[to_t("format")] = json_string(sender.format);
+    object[to_t("enable")] = value::boolean(sender.enable);
+
+    object[to_t("source_ip")] = json_string(sender.source_ip);
+    object[to_t("ip")] = json_string(sender.ip);
+    object[to_t("port")] = value::number(sender.port);
+    object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+    return object;
+  }
+
+  seeder::nmos_node::VideoReceiver video_receiver_from_json(const value &object)
+  {
+    seeder::nmos_node::VideoReceiver receiver;
+    receiver.id = get_string_or(object, "id");
+    receiver.name = get_string_or(object, "name");
+    receiver.enable = get_bool_or(object, "enable", false);
+    receiver.source_ip = get_string_or(object, "source_ip");
+    receiver.ip = get_string_or(object, "ip");
+    receiver.port = get_int_or(object, "port", 0);
+    if (object.has_field(to_t("redudancy")))
+    {
+      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+    }
+    else
+    {
+      receiver.redudancy.enable =
+          get_bool_or(object, "redudancy_enable", false);
+    }
+    if (object.has_field(to_t("caps")) && object.at(to_t("caps")).is_object())
+    {
+      const auto &caps = object.at(to_t("caps"));
+      receiver.caps.formats = string_vector_from_json(caps, "formats");
+      receiver.caps.colorspaces = string_vector_from_json(caps, "colorspaces");
+      receiver.caps.transfer_characteristics =
+          string_vector_from_json(caps, "transfer_characteristics");
+    }
+    receiver.format = get_string_or(object, "format");
+    receiver.colorspace = get_string_or(object, "colorspace");
+    receiver.transfer_characteristics =
+        get_string_or(object, "transfer_characteristics");
+    return receiver;
+  }
+
+  value video_receiver_to_json(const seeder::nmos_node::VideoReceiver &receiver)
+  {
+    value object = value::object();
+    object[to_t("id")] = json_string(receiver.id);
+    object[to_t("name")] = json_string(receiver.name);
+    object[to_t("enable")] = value::boolean(receiver.enable);
+    object[to_t("source_ip")] = json_string(receiver.source_ip);
+    object[to_t("ip")] = json_string(receiver.ip);
+    object[to_t("port")] = value::number(receiver.port);
+    object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
+    if (!receiver.caps.formats.empty() || !receiver.caps.colorspaces.empty() ||
+        !receiver.caps.transfer_characteristics.empty())
+    {
+      value caps = value::object();
+      caps[to_t("formats")] = string_vector_to_json(receiver.caps.formats);
+      caps[to_t("colorspaces")] =
+          string_vector_to_json(receiver.caps.colorspaces);
+      caps[to_t("transfer_characteristics")] =
+          string_vector_to_json(receiver.caps.transfer_characteristics);
+      object[to_t("caps")] = std::move(caps);
+    }
+    object[to_t("format")] = json_string(receiver.format);
+    object[to_t("colorspace")] = json_string(receiver.colorspace);
+    object[to_t("transfer_characteristics")] =
+        json_string(receiver.transfer_characteristics);
+    // object[to_t("interlace")] = value::boolean(receiver.interlace);
+    // object[to_t("fps")] = value::number(receiver.fps);
+    // object[to_t("fps_numerator")] = value::number(receiver.fps_numerator);
+    // object[to_t("fps_denominator")] = value::number(receiver.fps_denominator);
+    // object[to_t("width")] = value::number(receiver.width);
+    // object[to_t("height")] = value::number(receiver.height);
+    // object[to_t("source_ip")] = json_string(receiver.source_ip);
+    // object[to_t("ip")] = json_string(receiver.ip);
+    // object[to_t("port")] = value::number(receiver.port);
+    // object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
+    // object[to_t("pg_format")] = value::number(receiver.pg_format);
+    return object;
+  }
+
+  seeder::nmos_node::AudioReceiver audio_receiver_from_json(const value &object)
+  {
+    seeder::nmos_node::AudioReceiver receiver;
+    receiver.id = get_string_or(object, "id");
+    receiver.name = get_string_or(object, "name");
+    receiver.enable = get_bool_or(object, "enable", false);
+    receiver.channel_count = get_int_or(object, "channel_count", 0);
+    receiver.bit_depth = get_int_or(object, "bit_depth", 0);
+    receiver.simple_rate = get_int_or(object, "simple_rate", 0);
+    receiver.packet_time = get_double_or(object, "packet_time", 0.0);
+    receiver.source_ip = get_string_or(object, "source_ip");
+    receiver.ip = get_string_or(object, "ip");
+    receiver.port = get_int_or(object, "port", 0);
+    if (object.has_field(to_t("redudancy")))
+    {
+      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+    }
+    return receiver;
+  }
+
+  value audio_receiver_to_json(const seeder::nmos_node::AudioReceiver &receiver)
+  {
+    value object = value::object();
+    object[to_t("id")] = json_string(receiver.id);
+    object[to_t("name")] = json_string(receiver.name);
+    object[to_t("enable")] = value::boolean(receiver.enable);
+    object[to_t("channel_count")] = value::number(receiver.channel_count);
+    object[to_t("bit_depth")] = value::number(receiver.bit_depth);
+    object[to_t("simple_rate")] = value::number(receiver.simple_rate);
+    object[to_t("packet_time")] = value::number(receiver.packet_time);
+    object[to_t("source_ip")] = json_string(receiver.source_ip);
+    object[to_t("ip")] = json_string(receiver.ip);
+    object[to_t("port")] = value::number(receiver.port);
+    object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
+    return object;
+  }
+
+  seeder::nmos_node::AncillaryReceiver ancillary_receiver_from_json(
+      const value &object)
+  {
+    seeder::nmos_node::AncillaryReceiver receiver;
+    receiver.id = get_string_or(object, "id");
+    receiver.name = get_string_or(object, "name");
+    receiver.format = get_string_or(object, "format");
+    receiver.enable = get_bool_or(object, "enable", false);
+    receiver.source_ip = get_string_or(object, "source_ip");
+    receiver.ip = get_string_or(object, "ip");
+    receiver.port = get_int_or(object, "port", 0);
+    if (object.has_field(to_t("redudancy")))
+    {
+      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+    }
+    return receiver;
+  }
+
+  value ancillary_receiver_to_json(
+      const seeder::nmos_node::AncillaryReceiver &receiver)
+  {
+    value object = value::object();
+    object[to_t("id")] = json_string(receiver.id);
+    object[to_t("name")] = json_string(receiver.name);
+    object[to_t("format")] = json_string(receiver.format);
+    object[to_t("enable")] = value::boolean(receiver.enable);
+    return object;
+  }
+
+  template <typename Receiver>
+  value make_receiver_message(const std::string &type_name, const Receiver &receiver,
+                              value (*serializer)(const Receiver &))
+  {
+    value object = value::object();
+    object[to_t("type")] = json_string(type_name);
+    object[to_t("payload")] = serializer(receiver);
+    return object;
+  }
+
+}
+
+namespace seeder::nmos_sync
+{
+
+  std::string PtpClockDto::effective_gmid() const
+  {
+    for (const auto &entry : entries)
+    {
+      if (entry.is_active && entry.is_connected && entry.master_initialized &&
+          !entry.grandmaster_identity.empty())
+      {
+        return entry.grandmaster_identity;
+      }
+    }
+    return {};
+  }
+
+  bool PtpClockDto::effective_locked() const
+  {
+    for (const auto &entry : entries)
+    {
+      if (entry.is_active && entry.is_connected && entry.master_initialized)
+      {
+        return entry.is_locked;
+      }
+    }
+    return false;
+  }
+
+  bool PtpClockDto::empty() const
+  {
+    return entries.empty();
+  }
+
+  bool SnapshotDto::has_any_streams() const
+  {
+    return !video_senders.empty() || !audio_senders.empty() ||
+           !ancillary_senders.empty() || !video_receivers.empty() ||
+           !audio_receivers.empty() || !ancillary_receivers.empty();
+  }
+
+  SnapshotDto snapshot_from_json(const value &root)
+  {
+    require_field(root, to_t("senders"));
+    require_field(root, to_t("receivers"));
+
+    SnapshotDto snapshot;
+    if (root.has_field(to_t("ptp_clock")))
+    {
+      snapshot.ptp_clock.entries = ptp_entries_from_json(root.at(to_t("ptp_clock")));
+    }
+    if (root.has_field(to_t("devices")) && root.at(to_t("devices")).is_array())
+    {
+      for (const auto &device : root.at(to_t("devices")).as_array())
+      {
+        if (device.is_object())
+        {
+          snapshot.devices.push_back(device_from_json(device));
+        }
+      }
+    }
+
+    const auto &senders = root.at(to_t("senders"));
+    const auto &receivers = root.at(to_t("receivers"));
+
+    for (auto sender : senders.as_array())
+    {
+      if (sender.has_field(to_t("video")))
+      {
+        snapshot.video_senders.push_back(video_sender_from_json(sender["video"]));
+      }
+      if (sender.has_field(to_t("audio")))
+      {
+        snapshot.audio_senders.push_back(audio_sender_from_json(sender["audio"]));
+      }
+      if (sender.has_field(to_t("ancillary")))
+      {
+        snapshot.ancillary_senders.push_back(ancillary_sender_from_json(sender["ancillary"]));
+      }
+    }
+
+    for (auto receiver : receivers.as_array())
+    {
+      if (receiver.has_field(to_t("video")))
+      {
+        snapshot.video_receivers.push_back(video_receiver_from_json(receiver["video"]));
+      }
+      if (receiver.has_field(to_t("audio")))
+      {
+        snapshot.audio_receivers.push_back(audio_receiver_from_json(receiver["audio"]));
+      }
+      if (receiver.has_field(to_t("ancillary")))
+      {
+        snapshot.ancillary_receivers.push_back(ancillary_receiver_from_json(receiver["ancillary"]));
+      }
+    }
+
+    return snapshot;
+  }
+
+  web::json::value snapshot_to_json(const SnapshotDto &snapshot)
+  {
+    value root = value::object();
+    root[to_t("ptp_clock")] = ptp_entries_to_json(snapshot.ptp_clock.entries);
+    root[to_t("devices")] = vector_to_json(snapshot.devices, device_to_json);
+
+    value senders = value::object();
+    senders[to_t("video")] =
+        vector_to_json(snapshot.video_senders, video_sender_to_json);
+    senders[to_t("audio")] =
+        vector_to_json(snapshot.audio_senders, audio_sender_to_json);
+    senders[to_t("ancillary")] =
+        vector_to_json(snapshot.ancillary_senders, ancillary_sender_to_json);
+    root[to_t("senders")] = senders;
+
+    value receivers = value::object();
+    receivers[to_t("video")] =
+        vector_to_json(snapshot.video_receivers, video_receiver_to_json);
+    receivers[to_t("audio")] =
+        vector_to_json(snapshot.audio_receivers, audio_receiver_to_json);
+    receivers[to_t("ancillary")] =
+        vector_to_json(snapshot.ancillary_receivers, ancillary_receiver_to_json);
+    root[to_t("receivers")] = receivers;
+    return root;
+  }
+
+  std::optional<SnapshotChangedMessage>
+  snapshot_changed_message_from_json(const value &root)
+  {
+    if (!root.is_object() || !root.has_field(to_t("type")))
+    {
+      return std::nullopt;
+    }
+    if (get_string_or(root, "type") != "snapshot.changed")
+    {
+      return std::nullopt;
+    }
+
+    SnapshotChangedMessage message;
+    message.revision = get_int64_or(root, "revision", 0);
+    message.reason = get_string_or(root, "reason");
+    return message;
+  }
+
+  web::json::value make_node_lifecycle_message(const std::string &old_state,
+                                               const std::string &new_state)
+  {
+    value root = value::object();
+    root[to_t("type")] = json_string("node.lifecycle_changed");
+    value payload = value::object();
+    payload[to_t("old_state")] = json_string(old_state);
+    payload[to_t("new_state")] = json_string(new_state);
+    root[to_t("payload")] = payload;
+    return root;
+  }
+
+  web::json::value make_sync_failed_message(const SyncFailedMessage &message)
+  {
+    value root = value::object();
+    root[to_t("type")] = json_string("sync.failed");
+    root[to_t("revision")] = value::number(message.revision);
+    root[to_t("message")] = json_string(message.message);
+    return root;
+  }
+
+  web::json::value make_streams_drained_message()
+  {
+    value root = value::object();
+    root[to_t("type")] =
+        json_string("streams.drained_due_to_ws_disconnect");
+    root[to_t("message")] =
+        json_string("WebSocket disconnected, all registered senders/receivers removed");
+    return root;
+  }
+
+  web::json::value make_receiver_video_observed_changed_message(
+      const nmos_node::VideoReceiver &receiver)
+  {
+    return make_receiver_message("receiver.video.observed_changed", receiver,
+                                 video_receiver_to_json);
+  }
+
+  web::json::value make_receiver_audio_observed_changed_message(
+      const nmos_node::AudioReceiver &receiver)
+  {
+    return make_receiver_message("receiver.audio.observed_changed", receiver,
+                                 audio_receiver_to_json);
+  }
+
+  web::json::value make_receiver_ancillary_observed_changed_message(
+      const nmos_node::AncillaryReceiver &receiver)
+  {
+    return make_receiver_message("receiver.ancillary.observed_changed", receiver,
+                                 ancillary_receiver_to_json);
+  }
+
+  bool equivalent(const nmos_node::Redudancy &lhs,
+                  const nmos_node::Redudancy &rhs)
+  {
+    return lhs.enable == rhs.enable && lhs.ip == rhs.ip && lhs.port == rhs.port;
+  }
+
+  bool equivalent(const nmos_node::VideoSender &lhs,
+                  const nmos_node::VideoSender &rhs)
+  {
+    return  lhs.id == rhs.id && lhs.name == rhs.name &&
+           lhs.enable == rhs.enable  && lhs.video_format == rhs.video_format &&
+           lhs.colorspace == rhs.colorspace &&
+           lhs.transfer_characteristics == rhs.transfer_characteristics &&
+           lhs.source_ip == rhs.source_ip &&
+           lhs.ip == rhs.ip && lhs.port == rhs.port &&
+           equivalent(lhs.redudancy, rhs.redudancy) &&
+           lhs.pg_format == rhs.pg_format;
+  }
+
+  bool equivalent(const nmos_node::AudioSender &lhs,
+                  const nmos_node::AudioSender &rhs)
+  {
+    return lhs.id == rhs.id &&
+           lhs.name == rhs.name && lhs.source_ip == rhs.source_ip &&
+           lhs.enable == rhs.enable && lhs.channel_count == rhs.channel_count &&
+           lhs.bit_depth == rhs.bit_depth && lhs.simple_rate == rhs.simple_rate &&
+           lhs.ip == rhs.ip && lhs.port == rhs.port &&
+           equivalent(lhs.redudancy, rhs.redudancy);
+  }
+
+  bool equivalent(const nmos_node::AncillarySender &lhs,
+                  const nmos_node::AncillarySender &rhs)
+  {
+    return lhs.id == rhs.id &&
+           lhs.name == rhs.name && lhs.source_ip == rhs.source_ip &&
+           lhs.format == rhs.format && lhs.enable == rhs.enable &&
+           lhs.ip == rhs.ip && lhs.port == rhs.port &&
+           equivalent(lhs.redudancy, rhs.redudancy);
+  }
+
+  bool equivalent(const nmos_node::VideoReceiver &lhs,
+                  const nmos_node::VideoReceiver &rhs)
+  {
+    return  lhs.id == rhs.id && lhs.name == rhs.name &&
+           lhs.enable == rhs.enable &&
+           lhs.source_ip == rhs.source_ip && lhs.ip == rhs.ip &&
+           lhs.port == rhs.port &&
+           equivalent(lhs.redudancy, rhs.redudancy) &&
+           lhs.format == rhs.format &&
+           lhs.colorspace == rhs.colorspace &&
+           lhs.transfer_characteristics == rhs.transfer_characteristics &&
+           lhs.caps.formats == rhs.caps.formats &&
+           lhs.caps.colorspaces == rhs.caps.colorspaces &&
+           lhs.caps.transfer_characteristics ==
+               rhs.caps.transfer_characteristics;
+  }
+
+  bool equivalent(const nmos_node::AudioReceiver &lhs,
+                  const nmos_node::AudioReceiver &rhs)
+  {
+    return lhs.id == rhs.id &&
+           lhs.name == rhs.name && lhs.enable == rhs.enable &&
+           lhs.channel_count == rhs.channel_count &&
+           lhs.bit_depth == rhs.bit_depth && lhs.simple_rate == rhs.simple_rate &&
+           lhs.packet_time == rhs.packet_time && lhs.ip == rhs.ip &&
+           lhs.source_ip == rhs.source_ip && lhs.port == rhs.port &&
+           equivalent(lhs.redudancy, rhs.redudancy);
+  }
+
+  bool equivalent(const nmos_node::AncillaryReceiver &lhs,
+                  const nmos_node::AncillaryReceiver &rhs)
+  {
+    return  lhs.id == rhs.id &&
+           lhs.name == rhs.name && lhs.format == rhs.format &&
+           lhs.enable == rhs.enable && lhs.ip == rhs.ip &&
+           lhs.source_ip == rhs.source_ip && lhs.port == rhs.port &&
+           equivalent(lhs.redudancy, rhs.redudancy);
+  }
+
+  bool equivalent(const PtpClockDto &lhs, const PtpClockDto &rhs)
+  {
+    return lhs.entries == rhs.entries;
+  }
+
+  bool equivalent(const SnapshotDto::DeviceDto &lhs,
+                  const SnapshotDto::DeviceDto &rhs)
+  {
+    return lhs.device == rhs.device &&
+           lhs.display_name == rhs.display_name &&
+           lhs.enable == rhs.enable && lhs.id == rhs.id &&
+           lhs.sip == rhs.sip;
+  }
+}

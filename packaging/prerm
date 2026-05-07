@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+
+systemctl stop nmos-daemon.service || true
+systemctl disable nmos-daemon.service || true
+
+exit 0

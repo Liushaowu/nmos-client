@@ -1,39 +1,42 @@
 find_package(nmos-cpp REQUIRED)
 
+set(NMOS_CLIENT_CORE_SOURCES
+    node_implementation.cpp
+    node.cpp
+    daemon/video_format.cpp)
 
+set(NMOS_SYNC_DAEMON_SOURCES
+    daemon/app.cpp
+    daemon/config.cpp
+    daemon/dto.cpp
+    daemon/node_runtime.cpp
+    daemon/snapshot_client.cpp
+    daemon/ws_client.cpp
+    daemon/reconcile_engine.cpp
+    daemon/state_store.cpp
+    daemon/http_debug_server.cpp)
 
-add_library(nmos-client STATIC node_implementation.cpp node.cpp)
+add_executable(nmos-sync-daemon
+    daemon/main.cpp
+    ${NMOS_CLIENT_CORE_SOURCES}
+    ${NMOS_SYNC_DAEMON_SOURCES})
 
+target_include_directories(nmos-sync-daemon PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/daemon)
 
-#设置库的公共头文件目录
-target_include_directories(nmos-client PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<INSTALL_INTERFACE:include>
-)
+target_link_libraries(nmos-sync-daemon PRIVATE
+    nmos-cpp::compile-settings
+    nmos-cpp::nmos-cpp)
 
-# add_executable(
-#     nmos-client
+install(TARGETS nmos-sync-daemon
+        RUNTIME DESTINATION opt/nmos-daemon/bin)
 
-#     main.cpp
-#     node_implementation.cpp
-#     node.cpp
-# )
+install(FILES
+        ${CMAKE_SOURCE_DIR}/packaging/daemon_config.json
+        ${CMAKE_SOURCE_DIR}/packaging/node_config.json
+        DESTINATION opt/nmos-daemon/config)
 
-target_link_libraries(nmos-client nmos-cpp::compile-settings
-nmos-cpp::nmos-cpp)
-# 安装目标和头文件
-install(TARGETS nmos-client
-        EXPORT nmos-clientConfig
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib
-        RUNTIME DESTINATION bin)
-        install(FILES node.h node_implementation.h DESTINATION include)
-
-        #导出配置文件
-install(EXPORT nmos-clientConfig
-FILE nmos-clientConfig.cmake
-DESTINATION lib/cmake/nmos-client)
-
-
-export(TARGETS nmos-client FILE nmos-clientConfig.cmake)
-
+install(FILES
+        ${CMAKE_SOURCE_DIR}/packaging/nmos-daemon.service
+        DESTINATION etc/systemd/system)
