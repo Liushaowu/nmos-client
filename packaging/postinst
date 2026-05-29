@@ -1,6 +1,81 @@
 #!/bin/sh
 set -e
 
+NODE_CONFIG=/opt/nmos-daemon/config/node_config.json
+NMOS_CONFIG_UUID=
+NMOS_LABEL=${NMOS_NODE_LABEL:-}
+ENO1_IP=$(ip -o -4 addr show dev eno1 2>/dev/null | awk '{split($4, address, "/"); print address[1]; exit}')
+
+if [ -r /proc/sys/kernel/random/uuid ]; then
+    NMOS_CONFIG_UUID=$(cat /proc/sys/kernel/random/uuid)
+elif command -v uuidgen >/dev/null 2>&1; then
+    NMOS_CONFIG_UUID=$(uuidgen)
+fi
+
+if [ -z "$NMOS_LABEL" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    printf 'ProductName（回车使用主机名 S-MV）: ' >/dev/tty
+    IFS= read -r NMOS_LABEL </dev/tty || NMOS_LABEL=
+fi
+
+if [ -z "$NMOS_LABEL" ]; then
+    NMOS_LABEL=$(hostname 2>/dev/null || cat /proc/sys/kernel/hostname 2>/dev/null || true)
+fi
+
+if [ -n "$NMOS_CONFIG_UUID" ] && [ -f "$NODE_CONFIG" ]; then
+    python3 - "$NODE_CONFIG" "$NMOS_CONFIG_UUID" "$ENO1_IP" "$NMOS_LABEL" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+nmos_uuid = sys.argv[2]
+eno1_ip = sys.argv[3]
+nmos_label = sys.argv[4]
+instance_tag = "urn:x-nmos:tag:asset:instance-id/v1.0"
+product_tag = "urn:x-nmos:tag:asset:product/v1.0"
+
+
+def set_tag_value(tags, tag_name, tag_value):
+    if not isinstance(tags, dict):
+        tags = {}
+    values = tags.get(tag_name)
+    if not isinstance(values, list):
+        values = []
+    if values:
+        values[0] = tag_value
+    else:
+        values.append(tag_value)
+    tags[tag_name] = values
+    return tags
+
+with config_path.open("r", encoding="utf-8") as config_file:
+    config = json.load(config_file)
+
+config["seed_id"] = nmos_uuid
+config["node_tags"] = set_tag_value(config.get("node_tags"), instance_tag, nmos_uuid)
+config["device_tags"] = set_tag_value(config.get("device_tags"), instance_tag, nmos_uuid)
+
+if eno1_ip:
+    host_addresses = config.get("host_addresses")
+    if not isinstance(host_addresses, list):
+        host_addresses = []
+    if host_addresses:
+        host_addresses[0] = eno1_ip
+    else:
+        host_addresses.append(eno1_ip)
+    config["host_addresses"] = host_addresses
+
+if nmos_label:
+    config["label"] = nmos_label
+    config["node_tags"] = set_tag_value(config.get("node_tags"), product_tag, nmos_label)
+    config["device_tags"] = set_tag_value(config.get("device_tags"), product_tag, nmos_label)
+
+with config_path.open("w", encoding="utf-8") as config_file:
+    json.dump(config, config_file, indent=4)
+    config_file.write("\n")
+PY
+fi
+
 systemctl daemon-reload
 systemctl enable nmos-daemon.service || true
 systemctl restart nmos-daemon.service || systemctl start nmos-daemon.service || true

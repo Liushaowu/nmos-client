@@ -451,6 +451,8 @@ static std::unordered_map<std::string, video_format_desc> init_format_name_map()
     std::unordered_map<std::string, video_format_desc> fmt_map;
     for (auto &f : format_descs) {
         fmt_map.emplace(f.name, f);
+        fmt_map.emplace(f.display_name, f);
+        fmt_map.emplace(f.monitor_mode_name, f);
     }
     return fmt_map;
 }

@@ -26,7 +26,7 @@ public:
 
   int run();
   void stop();
-  web::json::value node_config_json() const;
+  web::json::value node_settings_json() const;
   web::json::value available_registries_json() const;
   web::json::value update_node_config(const web::json::value &patch,
                                       bool replace_entire_document);

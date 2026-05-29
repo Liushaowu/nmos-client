@@ -2,6 +2,7 @@
 
 #include <cpprest/http_client.h>
 
+#include <iostream>
 #include <stdexcept>
 
 namespace seeder::nmos_sync
@@ -25,7 +26,9 @@ namespace seeder::nmos_sync
     }
     // std::string response_body = response.extract_string().get();
     auto json = response.extract_json().get();
-    std::string response_body  = json.serialize();
+    std::string response_body = json.serialize();
+    std::cerr << "nmos-sync-daemon snapshot response, url=" << snapshot_url_
+              << ", body=" << response_body << std::endl;
     return snapshot_from_json(json);
   }
 

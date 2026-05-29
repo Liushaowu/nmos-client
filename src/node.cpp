@@ -20,6 +20,7 @@
 #include <asm-generic/errno.h>
 #include <atomic>
 #include <cmath>
+#include <chrono>
 #include <condition_variable>
 #include <cpprest/details/basic_types.h>
 #include <cpprest/json.h>
@@ -223,7 +224,7 @@ namespace
         const auto audio = nmos::get_audio_L_parameters(sdp_params);
         receiver.channel_count = static_cast<int>(audio.channel_count);
         receiver.bit_depth = static_cast<int>(audio.bit_depth);
-        receiver.simple_rate = static_cast<int>(audio.sample_rate);
+        receiver.sample_rate = static_cast<int>(audio.sample_rate);
         receiver.packet_time = audio.packet_time;
         return true;
       }
@@ -483,6 +484,12 @@ sdp::sampling st_get_color_sampling(st20_fmt fmt)
     return sdp::samplings::YCbCr_4_2_0;
   case ST20_FMT_YUV_420_12BIT: /**< 12-bit YUV 4:2:0 */
     return sdp::samplings::YCbCr_4_2_0;
+  case ST20_FMT_YUV_420_16BIT:
+    return sdp::samplings::YCbCr_4_2_0;
+  case ST20_FMT_YUV_422_PLANAR10LE:
+    return sdp::samplings::YCbCr_4_2_2;
+  case ST20_FMT_V210:
+    return sdp::samplings::YCbCr_4_2_2;
   case ST20_FMT_RGB_8BIT: /**< 8-bit RGB */
     return sdp::samplings::RGB;
   case ST20_FMT_RGB_10BIT: /**< 10-bit RGB */
@@ -523,6 +530,12 @@ int st_get_component_depth(st20_fmt fmt)
     return 10;
   case ST20_FMT_YUV_420_12BIT: /**< 12-bit YUV 4:2:0 */
     return 12;
+  case ST20_FMT_YUV_420_16BIT:
+    return 16;
+  case ST20_FMT_YUV_422_PLANAR10LE:
+    return 10;
+  case ST20_FMT_V210:
+    return 10;
   case ST20_FMT_RGB_8BIT: /**< 8-bit RGB */
     return 8;
   case ST20_FMT_RGB_10BIT: /**< 10-bit RGB */
@@ -621,6 +634,16 @@ namespace seeder
 
       bool stop()
       {
+        const auto stop_started = std::chrono::steady_clock::now();
+        const auto log_elapsed = [&stop_started](const char *step)
+        {
+          const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - stop_started);
+          std::cerr << "nmos node stop: " << step
+                    << ", elapsed_ms=" << elapsed.count() << std::endl;
+        };
+
+        log_elapsed("begin");
         bool stop_completed = false;
         bool should_join_thread = false;
         std::thread::id worker_thread_id;
@@ -654,7 +677,9 @@ namespace seeder
             should_join_thread = std::this_thread::get_id() != worker_thread_id;
             if (should_join_thread)
             {
+              log_elapsed("joining worker thread");
               thread_.join();
+              log_elapsed("worker thread joined");
               stop_completed = true;
             }
           }
@@ -673,6 +698,7 @@ namespace seeder
           stop_completed = true;
         }
 
+        log_elapsed("complete");
         return stop_completed;
       }
 
@@ -831,6 +857,7 @@ namespace seeder
                 video->enable = master_enable;
                 video->ip = multicast_ip;
                 video->port = dest_port;
+                video->redudancy.source_ip = source_ip_07;
                 video->redudancy.ip = multicast_ip_07;
                 video->redudancy.port = dest_port_07;
                 update_video_receiver_from_transport_file(*video, transport_file, *gate_);
@@ -841,6 +868,7 @@ namespace seeder
                 audio->enable = master_enable;
                 audio->ip = multicast_ip;
                 audio->port = dest_port;
+                audio->redudancy.source_ip = source_ip_07;
                 audio->redudancy.ip = multicast_ip_07;
                 audio->redudancy.port = dest_port_07;
                 update_audio_receiver_from_transport_file(*audio, transport_file, *gate_);
@@ -851,6 +879,7 @@ namespace seeder
                 ancillary->enable = master_enable;
                 ancillary->ip = multicast_ip;
                 ancillary->port = dest_port;
+                ancillary->redudancy.source_ip = source_ip_07;
                 ancillary->redudancy.ip = multicast_ip_07;
                 ancillary->redudancy.port = dest_port_07;
                 ancillary_snapshot = *ancillary;
@@ -1002,6 +1031,7 @@ namespace seeder
           // https://specs.amwa.tv/is-05/releases/v1.0.0/docs/2.2._APIs_-_Server_Side_Implementation.html#use-of-auto
           bool smpte2022_7 = false;
           std::string source_ip = "";
+          std::string redudancy_source_ip = "";
           std::string ip = "";
           int port = 0;
           std::string redudancy_ip;
@@ -1013,6 +1043,7 @@ namespace seeder
             {
               smpte2022_7 = video->redudancy.enable;
               source_ip = video->source_ip;
+              redudancy_source_ip = video->redudancy.source_ip;
               ip = video->ip;
               redudancy_ip = video->redudancy.ip;
               port = video->port;
@@ -1023,6 +1054,7 @@ namespace seeder
             {
               smpte2022_7 = audio->redudancy.enable;
               source_ip = audio->source_ip;
+              redudancy_source_ip = audio->redudancy.source_ip;
               ip = audio->ip;
               redudancy_ip = audio->redudancy.ip;
               port = audio->port;
@@ -1033,6 +1065,7 @@ namespace seeder
             {
               smpte2022_7 = ancillary->redudancy.enable;
               source_ip = ancillary->source_ip;
+              redudancy_source_ip = ancillary->redudancy.source_ip;
               ip = ancillary->ip;
               redudancy_ip = ancillary->redudancy.ip;
               port = ancillary->port;
@@ -1046,7 +1079,7 @@ namespace seeder
               nmos::details::resolve_auto(transport_params_array[1],
                                           nmos::fields::source_ip,
                                           [&]
-                                          { return value::string(source_ip); });
+                                          { return value::string(redudancy_source_ip.empty() ? source_ip : redudancy_source_ip); });
             }
             nmos::details::resolve_auto(transport_params_array[0],
                                         nmos::fields::destination_ip,
@@ -1233,18 +1266,31 @@ namespace seeder
                     nmos::fields::media_type(flow->data)};
                 if (nmos::media_types::video_raw == video_type)
                 {
-                  auto raw_params = nmos::make_video_raw_parameters(node->data, source->data, flow->data, sender.data, sdp::type_parameters::type_N);
+                  nmos::video_raw_parameters raw_params;
+                  try
+                  {
+                    raw_params = nmos::make_video_raw_parameters(node->data, source->data, flow->data, sender.data, sdp::type_parameters::type_N);
+                  }
+                  catch (const std::exception &error)
+                  {
+                    throw std::runtime_error(
+                        std::string("failed to make video/raw SDP parameters: ") +
+                        error.what() + ", flow=" + flow->data.serialize() +
+                        ", sender=" + sender.data.serialize());
+                  }
                   const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, 127);
                   return nmos::make_video_raw_sdp_parameters(
-                      session_name, raw_params, nmos::details::payload_type_video_default, {}, ts_refclk);
+                      session_name, raw_params, nmos::details::payload_type_video_default, mids, ts_refclk);
                 }
+                throw std::logic_error("unexpected video media type");
               }
               else if (nmos::formats::audio == format)
               {
                 double packet_time = 1;
 
                 auto audio_L_params = nmos::make_audio_L_parameters(node->data, source->data, flow->data, sender.data, packet_time);
-                return nmos::make_audio_L_sdp_parameters(session_name, audio_L_params, nmos::details::payload_type_audio_default, {}, {});
+                const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, 127);
+                return nmos::make_audio_L_sdp_parameters(session_name, audio_L_params, nmos::details::payload_type_audio_default, mids, ts_refclk);
               }
               else if (nmos::formats::data == format)
               {
@@ -1264,10 +1310,33 @@ namespace seeder
               {
                 throw std::logic_error("unexpected flow format");
               }
+              throw std::logic_error("failed to make SDP parameters");
             }();
 
             auto &transport_params = nmos::fields::transport_params(
                 nmos::fields::endpoint_active(connection_sender.data));
+
+            if (transport_params.is_array())
+            {
+              const auto leg_count = transport_params.as_array().size();
+              auto &media_stream_ids = sdp_params.group.media_stream_ids;
+              for (auto leg = media_stream_ids.size(); leg < leg_count; ++leg)
+              {
+                if (0 == leg)
+                {
+                  media_stream_ids.push_back(U("PRIMARY"));
+                }
+                else if (1 == leg)
+                {
+                  media_stream_ids.push_back(U("SECONDARY"));
+                }
+                else
+                {
+                  media_stream_ids.push_back(
+                      utility::conversions::to_string_t("LEG" + std::to_string(leg + 1)));
+                }
+              }
+            }
 
             // std::string transport_params_json = transport_params.serialize();
             // std::cout << "transport_params_json: "
@@ -1873,6 +1942,18 @@ namespace seeder
         std::string id = video.id;
         std::string name = video.name;
         seeder::core::video_format_desc format_desc = seeder::core::video_format_desc::get(video.video_format);
+        if (format_desc.is_invalid())
+        {
+          throw node_implementation_init_exception(
+              "invalid video sender video_format: " + video.video_format);
+        }
+        if (video.pg_format < 0 ||
+            video.pg_format >= static_cast<int>(ST20_FMT_MAX))
+        {
+          throw node_implementation_init_exception(
+              "invalid video sender pg_format: " +
+              std::to_string(video.pg_format));
+        }
 
         const auto sampling = st_get_color_sampling((st20_fmt)video.pg_format);
         const auto bit_depth = st_get_component_depth((st20_fmt)video.pg_format);
@@ -1992,7 +2073,7 @@ namespace seeder
         nmos::write_lock lock = node_model_.write_lock();
 
         nmos::rational frame_rate = nmos::parse_rational(web::json::value_of(
-            {{nmos::fields::numerator, audio.simple_rate},
+            {{nmos::fields::numerator, audio.sample_rate},
              {nmos::fields::denominator, 1}}));
         ;
         std::string id = audio.id;
@@ -2023,14 +2104,14 @@ namespace seeder
                                                                         (int)impl::channels_repeat.size()]; }));
 
         int bit_depth = audio.bit_depth;
-        int simple_rate = audio.simple_rate;
+        int sample_rate = audio.sample_rate;
         nmos::resource source =
             nmos::make_audio_source(source_id, device_id_, nmos::clock_names::clk0,
                                     frame_rate, channels, node_model_.settings);
         // impl::insert_parents(source, seed_id_, port, index);
         impl::set_label_description(source, port, name);
         nmos::resource flow =
-            nmos::make_raw_audio_flow(flow_id, source_id, device_id_, simple_rate,
+            nmos::make_raw_audio_flow(flow_id, source_id, device_id_, frame_rate,
                                       bit_depth, node_model_.settings);
 
         // impl::insert_parents(flow, seed_id_, port, index);
@@ -2424,53 +2505,54 @@ namespace seeder
 
         int sample_rate =
             audio
-                .simple_rate; // st30_get_sample_rate(session->info.audio_sampling);
+                .sample_rate; // st30_get_sample_rate(session->info.audio_sampling);
         double packet_time = audio.packet_time;
         // (double)st30_get_packet_time(session->info.audio_ptime) / 1000000;
 
-        web::json::value audio_constraint_set = value::object();
-        bool has_audio_caps = false;
+        // web::json::value audio_constraint_set = value::object();
+        // bool has_audio_caps = false;
 
-        if (audio.channel_count > 0)
-        {
-          audio_constraint_set[nmos::caps::format::channel_count] =
-              nmos::make_caps_integer_constraint({}, 1, audio.channel_count);
-          has_audio_caps = true;
-        }
+        // if (audio.channel_count > 0)
+        // {
+        //   audio_constraint_set[nmos::caps::format::channel_count] =
+        //       nmos::make_caps_integer_constraint({}, 1, audio.channel_count);
+        //   has_audio_caps = true;
+        // }
 
-        if (sample_rate > 0)
-        {
-          audio_constraint_set[nmos::caps::format::sample_rate] =
-              nmos::make_caps_rational_constraint({nmos::rational{sample_rate, 1}});
-          has_audio_caps = true;
-        }
+        // if (sample_rate > 0)
+        // {
+        //   audio_constraint_set[nmos::caps::format::sample_rate] =
+        //       nmos::make_caps_rational_constraint({nmos::rational{sample_rate, 1}});
+        //   has_audio_caps = true;
+        // }
 
-        if (bit_depth > 0)
-        {
-          audio_constraint_set[nmos::caps::format::sample_depth] =
-              nmos::make_caps_integer_constraint({bit_depth});
-          has_audio_caps = true;
-        }
+        // if (bit_depth > 0)
+        // {
+        //   audio_constraint_set[nmos::caps::format::sample_depth] =
+        //       nmos::make_caps_integer_constraint({bit_depth});
+        //   has_audio_caps = true;
+        // }
 
-        if (packet_time > 0.0)
-        {
-          audio_constraint_set[nmos::caps::transport::packet_time] =
-              nmos::make_caps_number_constraint({packet_time});
-          has_audio_caps = true;
-        }
+        // if (packet_time > 0.0)
+        // {
+        //   audio_constraint_set[nmos::caps::transport::packet_time] =
+        //       nmos::make_caps_number_constraint({packet_time});
+        //   has_audio_caps = true;
+        // }
 
-        if (has_audio_caps)
-        {
-          web::json::value audio_constraint_sets = value::array();
-          audio_constraint_sets[0] = std::move(audio_constraint_set);
-          receiver.data[nmos::fields::caps][nmos::fields::constraint_sets] =
-              std::move(audio_constraint_sets);
-        }
-
-        receiver.data[nmos::fields::version] =
-            receiver.data[nmos::fields::caps][nmos::fields::version] =
-                value(nmos::make_version());
-
+        // if (has_audio_caps)
+        // {
+        //   web::json::value audio_constraint_sets = value::array();
+        //   audio_constraint_sets[0] = std::move(audio_constraint_set);
+        //   receiver.data[nmos::fields::caps][nmos::fields::constraint_sets] =
+        //       std::move(audio_constraint_sets);
+        // }
+        // if (has_audio_caps)
+        // {
+        // receiver.data[nmos::fields::version] =
+        //     receiver.data[nmos::fields::caps][nmos::fields::version] =
+        //         value(nmos::make_version());
+        // }
         impl::set_label_description(receiver, impl::ports::audio, name);
         impl::insert_group_hint(receiver, impl::ports::audio, id, name);
 
@@ -2823,15 +2905,16 @@ namespace seeder
           receiver_ids_.erase(found_receiver);
         }
 
-        remove_resource_after(delay_millis, node_model_.node_resources, receiver_id,
-                              *gate_, lock);
-        remove_resource_after(delay_millis, node_model_.connection_resources,
-                              receiver_id, *gate_, lock);
-        remove_video_receiver_by_id(id);
         nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
                                                                        {
                                                                          device.data[nmos::fields::receivers] = value_from_elements(receiver_ids_);
                                                                          device.data[nmos::fields::version] = value(nmos::make_version()); }));
+        node_model_.notify();
+        remove_resource_after(delay_millis, node_model_.connection_resources,
+                              receiver_id, *gate_, lock);
+        remove_resource_after(delay_millis, node_model_.node_resources, receiver_id,
+                              *gate_, lock);
+        remove_video_receiver_by_id(id);
       }
 
       void remove_audio_receiver(std::string id)
@@ -2852,15 +2935,16 @@ namespace seeder
         {
           receiver_ids_.erase(found_receiver);
         }
-        remove_resource_after(delay_millis, node_model_.node_resources, receiver_id,
-                              *gate_, lock);
-        remove_resource_after(delay_millis, node_model_.connection_resources,
-                              receiver_id, *gate_, lock);
-        remove_audio_receiver_by_id(id);
         nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
                                                                        {
                                                                          device.data[nmos::fields::receivers] = value_from_elements(receiver_ids_);
                                                                          device.data[nmos::fields::version] = value(nmos::make_version()); }));
+        node_model_.notify();
+        remove_resource_after(delay_millis, node_model_.connection_resources,
+                              receiver_id, *gate_, lock);
+        remove_resource_after(delay_millis, node_model_.node_resources, receiver_id,
+                              *gate_, lock);
+        remove_audio_receiver_by_id(id);
       }
       void remove_ancillary_receiver(std::string id)
       {
@@ -2880,15 +2964,16 @@ namespace seeder
         {
           receiver_ids_.erase(found_receiver);
         }
-        remove_resource_after(delay_millis, node_model_.node_resources, receiver_id,
-                              *gate_, lock);
-        remove_resource_after(delay_millis, node_model_.connection_resources,
-                              receiver_id, *gate_, lock);
-        remove_ancillary_receiver_by_id(id);
         nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
                                                                        {
                                                                          device.data[nmos::fields::receivers] = value_from_elements(receiver_ids_);
                                                                          device.data[nmos::fields::version] = value(nmos::make_version()); }));
+        node_model_.notify();
+        remove_resource_after(delay_millis, node_model_.connection_resources,
+                              receiver_id, *gate_, lock);
+        remove_resource_after(delay_millis, node_model_.node_resources, receiver_id,
+                              *gate_, lock);
+        remove_ancillary_receiver_by_id(id);
       }
       void update_video_sender(VideoSender video)
       {

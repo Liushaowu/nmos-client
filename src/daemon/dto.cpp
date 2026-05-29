@@ -1,8 +1,10 @@
+#include "../node.h"
 #include "dto.h"
 
 #include <cpprest/details/basic_types.h>
 
 #include <stdexcept>
+#include <string>
 
 using web::json::value;
 
@@ -19,6 +21,24 @@ namespace
     return utility::conversions::to_utf8string(value);
   }
 
+  std::string field_path(const std::string &base, const char *name)
+  {
+    return base.empty() ? std::string(name) : base + "." + name;
+  }
+
+  std::string index_path(const std::string &base, std::size_t index)
+  {
+    return base + "[" + std::to_string(index) + "]";
+  }
+
+  std::runtime_error invalid_field_error(const std::string &path,
+                                         const std::string &expected,
+                                         const std::exception &error)
+  {
+    return std::runtime_error("invalid JSON field '" + path + "': expected " +
+                              expected + ": " + error.what());
+  }
+
   void require_field(const value &object, const utility::string_t &name)
   {
     if (!object.is_object() || !object.has_field(name))
@@ -28,7 +48,8 @@ namespace
   }
 
   std::string get_string_or(const value &object, const char *name,
-                            const std::string &fallback = {})
+                            const std::string &fallback = {},
+                            const std::string &path_base = {})
   {
     const auto field = to_t(name);
     if (!object.is_object() || !object.has_field(field) ||
@@ -36,10 +57,19 @@ namespace
     {
       return fallback;
     }
-    return to_utf8(object.at(field).as_string());
+    const auto path = field_path(path_base, name);
+    try
+    {
+      return to_utf8(object.at(field).as_string());
+    }
+    catch (const std::exception &error)
+    {
+      throw invalid_field_error(path, "string", error);
+    }
   }
 
-  bool get_bool_or(const value &object, const char *name, bool fallback = false)
+  bool get_bool_or(const value &object, const char *name, bool fallback = false,
+                   const std::string &path_base = {})
   {
     const auto field = to_t(name);
     if (!object.is_object() || !object.has_field(field) ||
@@ -47,19 +77,28 @@ namespace
     {
       return fallback;
     }
-    const auto &raw = object.at(field);
-    if (raw.is_boolean())
+    const auto path = field_path(path_base, name);
+    try
     {
+      const auto &raw = object.at(field);
+      if (raw.is_boolean())
+      {
+        return raw.as_bool();
+      }
+      if (raw.is_integer())
+      {
+        return 0 != raw.as_integer();
+      }
       return raw.as_bool();
     }
-    if (raw.is_integer())
+    catch (const std::exception &error)
     {
-      return 0 != raw.as_integer();
+      throw invalid_field_error(path, "boolean", error);
     }
-    return raw.as_bool();
   }
 
-  int get_int_or(const value &object, const char *name, int fallback = 0)
+  int get_int_or(const value &object, const char *name, int fallback = 0,
+                 const std::string &path_base = {})
   {
     const auto field = to_t(name);
     if (!object.is_object() || !object.has_field(field) ||
@@ -67,11 +106,20 @@ namespace
     {
       return fallback;
     }
-    return object.at(field).as_integer();
+    const auto path = field_path(path_base, name);
+    try
+    {
+      return object.at(field).as_integer();
+    }
+    catch (const std::exception &error)
+    {
+      throw invalid_field_error(path, "integer", error);
+    }
   }
 
   std::int64_t get_int64_or(const value &object, const char *name,
-                            std::int64_t fallback = 0)
+                            std::int64_t fallback = 0,
+                            const std::string &path_base = {})
   {
     const auto field = to_t(name);
     if (!object.is_object() || !object.has_field(field) ||
@@ -79,11 +127,20 @@ namespace
     {
       return fallback;
     }
-    return object.at(field).as_number().to_int64();
+    const auto path = field_path(path_base, name);
+    try
+    {
+      return object.at(field).as_number().to_int64();
+    }
+    catch (const std::exception &error)
+    {
+      throw invalid_field_error(path, "integer", error);
+    }
   }
 
   double get_double_or(const value &object, const char *name,
-                       double fallback = 0.0)
+                       double fallback = 0.0,
+                       const std::string &path_base = {})
   {
     const auto field = to_t(name);
     if (!object.is_object() || !object.has_field(field) ||
@@ -91,13 +148,22 @@ namespace
     {
       return fallback;
     }
-    return object.at(field).as_double();
+    const auto path = field_path(path_base, name);
+    try
+    {
+      return object.at(field).as_double();
+    }
+    catch (const std::exception &error)
+    {
+      throw invalid_field_error(path, "number", error);
+    }
   }
 
   value json_string(const std::string &text) { return value::string(to_t(text)); }
 
   std::vector<std::string> string_vector_from_json(const value &object,
-                                                   const char *name)
+                                                   const char *name,
+                                                   const std::string &path_base = {})
   {
     const auto field = to_t(name);
     if (!object.is_object() || !object.has_field(field) ||
@@ -107,12 +173,22 @@ namespace
     }
 
     std::vector<std::string> items;
+    const auto path = field_path(path_base, name);
+    std::size_t index = 0;
     for (const auto &item : object.at(field).as_array())
     {
       if (!item.is_null())
       {
-        items.push_back(to_utf8(item.as_string()));
+        try
+        {
+          items.push_back(to_utf8(item.as_string()));
+        }
+        catch (const std::exception &error)
+        {
+          throw invalid_field_error(index_path(path, index), "string", error);
+        }
       }
+      ++index;
     }
     return items;
   }
@@ -127,24 +203,29 @@ namespace
     return array;
   }
 
-  seeder::nmos_sync::PtpClockDto::Entry ptp_entry_from_json(const value &object)
+  seeder::nmos_sync::PtpClockDto::Entry ptp_entry_from_json(
+      const value &object, const std::string &path)
   {
     seeder::nmos_sync::PtpClockDto::Entry entry;
-    entry.clock_accuracy = get_int_or(object, "clock_accuracy", 0);
-    entry.clock_class = get_int_or(object, "clock_class", 0);
-    entry.grandmaster_identity = get_string_or(object, "grandmaster_identity");
-    entry.grandmaster_priority1 = get_int_or(object, "grandmaster_priority1", 0);
-    entry.grandmaster_priority2 = get_int_or(object, "grandmaster_priority2", 0);
-    entry.is_active = get_bool_or(object, "is_active", false);
-    entry.is_connected = get_bool_or(object, "is_connected", false);
-    entry.is_locked = get_bool_or(object, "is_locked", false);
-    entry.master_initialized = get_bool_or(object, "master_initialized", false);
-    entry.master_port_id = get_string_or(object, "master_port_id");
-    entry.master_utc_offset = get_int_or(object, "master_utc_offset", 0);
-    entry.offset = get_double_or(object, "offset", 0.0);
+    entry.clock_accuracy = get_int_or(object, "clock_accuracy", 0, path);
+    entry.clock_class = get_int_or(object, "clock_class", 0, path);
+    entry.grandmaster_identity =
+        get_string_or(object, "grandmaster_identity", {}, path);
+    entry.grandmaster_priority1 =
+        get_int_or(object, "grandmaster_priority1", 0, path);
+    entry.grandmaster_priority2 =
+        get_int_or(object, "grandmaster_priority2", 0, path);
+    entry.is_active = get_bool_or(object, "is_active", false, path);
+    entry.is_connected = get_bool_or(object, "is_connected", false, path);
+    entry.is_locked = get_bool_or(object, "is_locked", false, path);
+    entry.master_initialized =
+        get_bool_or(object, "master_initialized", false, path);
+    entry.master_port_id = get_string_or(object, "master_port_id", {}, path);
+    entry.master_utc_offset = get_int_or(object, "master_utc_offset", 0, path);
+    entry.offset = get_double_or(object, "offset", 0.0, path);
     entry.offset_scaled_log_variance =
-        get_int_or(object, "offset_scaled_log_variance", 0);
-    entry.t1_domain_number = get_int_or(object, "t1_domain_number", 0);
+        get_int_or(object, "offset_scaled_log_variance", 0, path);
+    entry.t1_domain_number = get_int_or(object, "t1_domain_number", 0, path);
     return entry;
   }
 
@@ -173,17 +254,20 @@ namespace
     return object;
   }
 
-  std::vector<seeder::nmos_sync::PtpClockDto::Entry> ptp_entries_from_json(const value &value)
+  std::vector<seeder::nmos_sync::PtpClockDto::Entry> ptp_entries_from_json(
+      const value &value, const std::string &path)
   {
     std::vector<seeder::nmos_sync::PtpClockDto::Entry> entries;
     if (value.is_array())
     {
+      std::size_t index = 0;
       for (const auto &item : value.as_array())
       {
         if (item.is_object())
         {
-          entries.push_back(ptp_entry_from_json(item));
+          entries.push_back(ptp_entry_from_json(item, index_path(path, index)));
         }
+        ++index;
       }
       return entries;
     }
@@ -191,24 +275,27 @@ namespace
     if (value.is_object() && value.has_field(to_t("entries")) &&
         value.at(to_t("entries")).is_array())
     {
+      std::size_t index = 0;
       for (const auto &item : value.at(to_t("entries")).as_array())
       {
         if (item.is_object())
         {
-          entries.push_back(ptp_entry_from_json(item));
+          entries.push_back(ptp_entry_from_json(
+              item, index_path(field_path(path, "entries"), index)));
         }
+        ++index;
       }
       return entries;
     }
 
     if (value.is_object())
     {
-      const auto gmid = get_string_or(value, "gmid");
+      const auto gmid = get_string_or(value, "gmid", {}, path);
       if (!gmid.empty() || value.has_field(to_t("locked")))
       {
         seeder::nmos_sync::PtpClockDto::Entry entry;
         entry.grandmaster_identity = gmid;
-        entry.is_locked = get_bool_or(value, "locked", false);
+        entry.is_locked = get_bool_or(value, "locked", false, path);
         entry.is_active = true;
         entry.is_connected = true;
         entry.master_initialized = true;
@@ -229,14 +316,15 @@ namespace
     return array;
   }
 
-  seeder::nmos_sync::SnapshotDto::DeviceDto device_from_json(const value &object)
+  seeder::nmos_sync::SnapshotDto::DeviceDto device_from_json(
+      const value &object, const std::string &path)
   {
     seeder::nmos_sync::SnapshotDto::DeviceDto device;
-    device.device = get_string_or(object, "device");
-    device.display_name = get_string_or(object, "display_name");
-    device.enable = get_bool_or(object, "enable", false);
-    device.id = get_int_or(object, "id", 0);
-    device.sip = get_string_or(object, "sip");
+    device.device = get_string_or(object, "device", {}, path);
+    device.display_name = get_string_or(object, "display_name", {}, path);
+    device.enable = get_bool_or(object, "enable", false, path);
+    device.id = get_int_or(object, "id", 0, path);
+    device.sip = get_string_or(object, "sip", {}, path);
     return device;
   }
 
@@ -263,12 +351,14 @@ namespace
     return array;
   }
 
-  seeder::nmos_node::Redudancy redudancy_from_json(const value &object)
+  seeder::nmos_node::Redudancy redudancy_from_json(
+      const value &object, const std::string &path)
   {
     seeder::nmos_node::Redudancy redudancy;
-    redudancy.enable = get_bool_or(object, "enable", false);
-    redudancy.ip = get_string_or(object, "ip");
-    redudancy.port = get_int_or(object, "port", 0);
+    redudancy.enable = get_bool_or(object, "enable", false, path);
+    redudancy.source_ip = get_string_or(object, "source_ip", {}, path);
+    redudancy.ip = get_string_or(object, "ip", {}, path);
+    redudancy.port = get_int_or(object, "port", 0, path);
     return redudancy;
   }
 
@@ -276,25 +366,32 @@ namespace
   {
     value object = value::object();
     object[to_t("enable")] = value::boolean(redudancy.enable);
+    object[to_t("source_ip")] = json_string(redudancy.source_ip);
     object[to_t("ip")] = json_string(redudancy.ip);
     object[to_t("port")] = value::number(redudancy.port);
     return object;
   }
 
-  seeder::nmos_node::VideoSender video_sender_from_json(const value &object)
+  seeder::nmos_node::VideoSender video_sender_from_json(
+      const value &object, const std::string &path)
   {
     seeder::nmos_node::VideoSender sender;
-    sender.id = get_string_or(object, "id");
-    sender.name = get_string_or(object, "name");
-    sender.enable = get_bool_or(object, "enable", false);
-    sender.video_format = get_string_or(object, "video_format");
-    sender.source_ip = get_string_or(object, "source_ip");
-    sender.ip = get_string_or(object, "ip");
-    sender.port = get_int_or(object, "port", 0);
-    sender.pg_format = get_int_or(object, "pg_format", 0);
+    sender.id = get_string_or(object, "id", {}, path);
+    sender.name = get_string_or(object, "name", {}, path);
+    sender.enable = get_bool_or(object, "enable", false, path);
+    sender.video_format = get_string_or(object, "video_format", {}, path);
+    sender.colorspace =
+        get_string_or(object, "colorspace", sender.colorspace, path);
+    sender.transfer_characteristics = get_string_or(
+        object, "transfer_characteristics", sender.transfer_characteristics, path);
+    sender.source_ip = get_string_or(object, "source_ip", {}, path);
+    sender.ip = get_string_or(object, "ip", {}, path);
+    sender.port = get_int_or(object, "port", 0, path);
+    sender.pg_format = get_int_or(object, "pg_format", 0, path);
     if (object.has_field(to_t("redudancy")))
     {
-      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
+                                             field_path(path, "redudancy"));
     }
     return sender;
   }
@@ -307,6 +404,9 @@ namespace
     object[to_t("name")] = json_string(sender.name);
     object[to_t("enable")] = value::boolean(sender.enable);
     object[to_t("video_format")] = json_string(sender.video_format);
+    object[to_t("colorspace")] = json_string(sender.colorspace);
+    object[to_t("transfer_characteristics")] =
+        json_string(sender.transfer_characteristics);
     object[to_t("source_ip")] = json_string(sender.source_ip);
     object[to_t("ip")] = json_string(sender.ip);
     object[to_t("port")] = value::number(sender.port);
@@ -315,21 +415,23 @@ namespace
     return object;
   }
 
-  seeder::nmos_node::AudioSender audio_sender_from_json(const value &object)
+  seeder::nmos_node::AudioSender audio_sender_from_json(
+      const value &object, const std::string &path)
   {
     seeder::nmos_node::AudioSender sender;
-    sender.id = get_string_or(object, "id");
-    sender.name = get_string_or(object, "name");
-    sender.enable = get_bool_or(object, "enable", false);
-    sender.channel_count = get_int_or(object, "channel_count", 0);
-    sender.bit_depth = get_int_or(object, "bit_depth", 0);
-    sender.simple_rate = get_int_or(object, "simple_rate", 0);
-    sender.source_ip = get_string_or(object, "source_ip");
-    sender.ip = get_string_or(object, "ip");
-    sender.port = get_int_or(object, "port", 0);
+    sender.id = get_string_or(object, "id", {}, path);
+    sender.name = get_string_or(object, "name", {}, path);
+    sender.enable = get_bool_or(object, "enable", false, path);
+    sender.channel_count = get_int_or(object, "channel_count", 0, path);
+    sender.bit_depth = get_int_or(object, "bit_depth", 0, path);
+    sender.sample_rate = get_int_or(object, "sample_rate", 0, path);
+    sender.source_ip = get_string_or(object, "source_ip", {}, path);
+    sender.ip = get_string_or(object, "ip", {}, path);
+    sender.port = get_int_or(object, "port", 0, path);
     if (object.has_field(to_t("redudancy")))
     {
-      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
+                                             field_path(path, "redudancy"));
     }
     return sender;
   }
@@ -343,7 +445,7 @@ namespace
     object[to_t("enable")] = value::boolean(sender.enable);
     object[to_t("channel_count")] = value::number(sender.channel_count);
     object[to_t("bit_depth")] = value::number(sender.bit_depth);
-    object[to_t("simple_rate")] = value::number(sender.simple_rate);
+    object[to_t("sample_rate")] = value::number(sender.sample_rate);
     object[to_t("source_ip")] = json_string(sender.source_ip);
     object[to_t("ip")] = json_string(sender.ip);
     object[to_t("port")] = value::number(sender.port);
@@ -351,19 +453,21 @@ namespace
     return object;
   }
 
-  seeder::nmos_node::AncillarySender ancillary_sender_from_json(const value &object)
+  seeder::nmos_node::AncillarySender ancillary_sender_from_json(
+      const value &object, const std::string &path)
   {
     seeder::nmos_node::AncillarySender sender;
-    sender.id = get_string_or(object, "id");
-    sender.name = get_string_or(object, "name");
-    sender.format = get_string_or(object, "format");
-    sender.enable = get_bool_or(object, "enable", false);
-    sender.source_ip = get_string_or(object, "source_ip");
-    sender.ip = get_string_or(object, "ip");
-    sender.port = get_int_or(object, "port", 0);
+    sender.id = get_string_or(object, "id", {}, path);
+    sender.name = get_string_or(object, "name", {}, path);
+    sender.format = get_string_or(object, "format", {}, path);
+    sender.enable = get_bool_or(object, "enable", false, path);
+    sender.source_ip = get_string_or(object, "source_ip", {}, path);
+    sender.ip = get_string_or(object, "ip", {}, path);
+    sender.port = get_int_or(object, "port", 0, path);
     if (object.has_field(to_t("redudancy")))
     {
-      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
+                                             field_path(path, "redudancy"));
     }
     return sender;
   }
@@ -385,36 +489,40 @@ namespace
     return object;
   }
 
-  seeder::nmos_node::VideoReceiver video_receiver_from_json(const value &object)
+  seeder::nmos_node::VideoReceiver video_receiver_from_json(
+      const value &object, const std::string &path)
   {
     seeder::nmos_node::VideoReceiver receiver;
-    receiver.id = get_string_or(object, "id");
-    receiver.name = get_string_or(object, "name");
-    receiver.enable = get_bool_or(object, "enable", false);
-    receiver.source_ip = get_string_or(object, "source_ip");
-    receiver.ip = get_string_or(object, "ip");
-    receiver.port = get_int_or(object, "port", 0);
+    receiver.id = get_string_or(object, "id", {}, path);
+    receiver.name = get_string_or(object, "name", {}, path);
+    receiver.enable = get_bool_or(object, "enable", false, path);
+    receiver.source_ip = get_string_or(object, "source_ip", {}, path);
+    receiver.ip = get_string_or(object, "ip", {}, path);
+    receiver.port = get_int_or(object, "port", 0, path);
     if (object.has_field(to_t("redudancy")))
     {
-      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
+                                               field_path(path, "redudancy"));
     }
     else
     {
       receiver.redudancy.enable =
-          get_bool_or(object, "redudancy_enable", false);
+          get_bool_or(object, "redudancy_enable", false, path);
     }
     if (object.has_field(to_t("caps")) && object.at(to_t("caps")).is_object())
     {
       const auto &caps = object.at(to_t("caps"));
-      receiver.caps.formats = string_vector_from_json(caps, "formats");
-      receiver.caps.colorspaces = string_vector_from_json(caps, "colorspaces");
+      const auto caps_path = field_path(path, "caps");
+      receiver.caps.formats = string_vector_from_json(caps, "formats", caps_path);
+      receiver.caps.colorspaces =
+          string_vector_from_json(caps, "colorspaces", caps_path);
       receiver.caps.transfer_characteristics =
-          string_vector_from_json(caps, "transfer_characteristics");
+          string_vector_from_json(caps, "transfer_characteristics", caps_path);
     }
-    receiver.format = get_string_or(object, "format");
-    receiver.colorspace = get_string_or(object, "colorspace");
+    receiver.format = get_string_or(object, "format", {}, path);
+    receiver.colorspace = get_string_or(object, "colorspace", {}, path);
     receiver.transfer_characteristics =
-        get_string_or(object, "transfer_characteristics");
+        get_string_or(object, "transfer_characteristics", {}, path);
     return receiver;
   }
 
@@ -457,22 +565,24 @@ namespace
     return object;
   }
 
-  seeder::nmos_node::AudioReceiver audio_receiver_from_json(const value &object)
+  seeder::nmos_node::AudioReceiver audio_receiver_from_json(
+      const value &object, const std::string &path)
   {
     seeder::nmos_node::AudioReceiver receiver;
-    receiver.id = get_string_or(object, "id");
-    receiver.name = get_string_or(object, "name");
-    receiver.enable = get_bool_or(object, "enable", false);
-    receiver.channel_count = get_int_or(object, "channel_count", 0);
-    receiver.bit_depth = get_int_or(object, "bit_depth", 0);
-    receiver.simple_rate = get_int_or(object, "simple_rate", 0);
-    receiver.packet_time = get_double_or(object, "packet_time", 0.0);
-    receiver.source_ip = get_string_or(object, "source_ip");
-    receiver.ip = get_string_or(object, "ip");
-    receiver.port = get_int_or(object, "port", 0);
+    receiver.id = get_string_or(object, "id", {}, path);
+    receiver.name = get_string_or(object, "name", {}, path);
+    receiver.enable = get_bool_or(object, "enable", false, path);
+    receiver.channel_count = get_int_or(object, "channel_count", 0, path);
+    receiver.bit_depth = get_int_or(object, "bit_depth", 0, path);
+    receiver.sample_rate = get_int_or(object, "sample_rate", 0, path);
+    receiver.packet_time = get_double_or(object, "packet_time", 0.0, path);
+    receiver.source_ip = get_string_or(object, "source_ip", {}, path);
+    receiver.ip = get_string_or(object, "ip", {}, path);
+    receiver.port = get_int_or(object, "port", 0, path);
     if (object.has_field(to_t("redudancy")))
     {
-      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
+                                               field_path(path, "redudancy"));
     }
     return receiver;
   }
@@ -485,7 +595,7 @@ namespace
     object[to_t("enable")] = value::boolean(receiver.enable);
     object[to_t("channel_count")] = value::number(receiver.channel_count);
     object[to_t("bit_depth")] = value::number(receiver.bit_depth);
-    object[to_t("simple_rate")] = value::number(receiver.simple_rate);
+    object[to_t("sample_rate")] = value::number(receiver.sample_rate);
     object[to_t("packet_time")] = value::number(receiver.packet_time);
     object[to_t("source_ip")] = json_string(receiver.source_ip);
     object[to_t("ip")] = json_string(receiver.ip);
@@ -495,19 +605,20 @@ namespace
   }
 
   seeder::nmos_node::AncillaryReceiver ancillary_receiver_from_json(
-      const value &object)
+      const value &object, const std::string &path)
   {
     seeder::nmos_node::AncillaryReceiver receiver;
-    receiver.id = get_string_or(object, "id");
-    receiver.name = get_string_or(object, "name");
-    receiver.format = get_string_or(object, "format");
-    receiver.enable = get_bool_or(object, "enable", false);
-    receiver.source_ip = get_string_or(object, "source_ip");
-    receiver.ip = get_string_or(object, "ip");
-    receiver.port = get_int_or(object, "port", 0);
+    receiver.id = get_string_or(object, "id", {}, path);
+    receiver.name = get_string_or(object, "name", {}, path);
+    receiver.format = get_string_or(object, "format", {}, path);
+    receiver.enable = get_bool_or(object, "enable", false, path);
+    receiver.source_ip = get_string_or(object, "source_ip", {}, path);
+    receiver.ip = get_string_or(object, "ip", {}, path);
+    receiver.port = get_int_or(object, "port", 0, path);
     if (object.has_field(to_t("redudancy")))
     {
-      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")));
+      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
+                                               field_path(path, "redudancy"));
     }
     return receiver;
   }
@@ -583,52 +694,68 @@ namespace seeder::nmos_sync
     SnapshotDto snapshot;
     if (root.has_field(to_t("ptp_clock")))
     {
-      snapshot.ptp_clock.entries = ptp_entries_from_json(root.at(to_t("ptp_clock")));
+      snapshot.ptp_clock.entries =
+          ptp_entries_from_json(root.at(to_t("ptp_clock")), "ptp_clock");
     }
     if (root.has_field(to_t("devices")) && root.at(to_t("devices")).is_array())
     {
+      std::size_t index = 0;
       for (const auto &device : root.at(to_t("devices")).as_array())
       {
         if (device.is_object())
         {
-          snapshot.devices.push_back(device_from_json(device));
+          snapshot.devices.push_back(
+              device_from_json(device, index_path("devices", index)));
         }
+        ++index;
       }
     }
 
     const auto &senders = root.at(to_t("senders"));
     const auto &receivers = root.at(to_t("receivers"));
 
+    std::size_t sender_index = 0;
     for (auto sender : senders.as_array())
     {
+      const auto sender_path = index_path("senders", sender_index);
       if (sender.has_field(to_t("video")))
       {
-        snapshot.video_senders.push_back(video_sender_from_json(sender["video"]));
+        snapshot.video_senders.push_back(video_sender_from_json(
+            sender["video"], field_path(sender_path, "video")));
       }
       if (sender.has_field(to_t("audio")))
       {
-        snapshot.audio_senders.push_back(audio_sender_from_json(sender["audio"]));
+        snapshot.audio_senders.push_back(audio_sender_from_json(
+            sender["audio"], field_path(sender_path, "audio")));
       }
       if (sender.has_field(to_t("ancillary")))
       {
-        snapshot.ancillary_senders.push_back(ancillary_sender_from_json(sender["ancillary"]));
+        snapshot.ancillary_senders.push_back(ancillary_sender_from_json(
+            sender["ancillary"], field_path(sender_path, "ancillary")));
       }
+      ++sender_index;
     }
 
+    std::size_t receiver_index = 0;
     for (auto receiver : receivers.as_array())
     {
+      const auto receiver_path = index_path("receivers", receiver_index);
       if (receiver.has_field(to_t("video")))
       {
-        snapshot.video_receivers.push_back(video_receiver_from_json(receiver["video"]));
+        snapshot.video_receivers.push_back(video_receiver_from_json(
+            receiver["video"], field_path(receiver_path, "video")));
       }
       if (receiver.has_field(to_t("audio")))
       {
-        snapshot.audio_receivers.push_back(audio_receiver_from_json(receiver["audio"]));
+        snapshot.audio_receivers.push_back(audio_receiver_from_json(
+            receiver["audio"], field_path(receiver_path, "audio")));
       }
       if (receiver.has_field(to_t("ancillary")))
       {
-        snapshot.ancillary_receivers.push_back(ancillary_receiver_from_json(receiver["ancillary"]));
+        snapshot.ancillary_receivers.push_back(ancillary_receiver_from_json(
+            receiver["ancillary"], field_path(receiver_path, "ancillary")));
       }
+      ++receiver_index;
     }
 
     return snapshot;
@@ -667,7 +794,7 @@ namespace seeder::nmos_sync
     {
       return std::nullopt;
     }
-    if (get_string_or(root, "type") != "snapshot.changed")
+    if (get_string_or(root, "type") != "data.changed")
     {
       return std::nullopt;
     }
@@ -733,7 +860,8 @@ namespace seeder::nmos_sync
   bool equivalent(const nmos_node::Redudancy &lhs,
                   const nmos_node::Redudancy &rhs)
   {
-    return lhs.enable == rhs.enable && lhs.ip == rhs.ip && lhs.port == rhs.port;
+    return lhs.enable == rhs.enable && lhs.source_ip == rhs.source_ip &&
+           lhs.ip == rhs.ip && lhs.port == rhs.port;
   }
 
   bool equivalent(const nmos_node::VideoSender &lhs,
@@ -755,7 +883,7 @@ namespace seeder::nmos_sync
     return lhs.id == rhs.id &&
            lhs.name == rhs.name && lhs.source_ip == rhs.source_ip &&
            lhs.enable == rhs.enable && lhs.channel_count == rhs.channel_count &&
-           lhs.bit_depth == rhs.bit_depth && lhs.simple_rate == rhs.simple_rate &&
+           lhs.bit_depth == rhs.bit_depth && lhs.sample_rate == rhs.sample_rate &&
            lhs.ip == rhs.ip && lhs.port == rhs.port &&
            equivalent(lhs.redudancy, rhs.redudancy);
   }
@@ -793,7 +921,7 @@ namespace seeder::nmos_sync
     return lhs.id == rhs.id &&
            lhs.name == rhs.name && lhs.enable == rhs.enable &&
            lhs.channel_count == rhs.channel_count &&
-           lhs.bit_depth == rhs.bit_depth && lhs.simple_rate == rhs.simple_rate &&
+           lhs.bit_depth == rhs.bit_depth && lhs.sample_rate == rhs.sample_rate &&
            lhs.packet_time == rhs.packet_time && lhs.ip == rhs.ip &&
            lhs.source_ip == rhs.source_ip && lhs.port == rhs.port &&
            equivalent(lhs.redudancy, rhs.redudancy);

@@ -9,6 +9,7 @@ WorkingDirectory=/opt/nmos-daemon
 ExecStart=/opt/nmos-daemon/bin/nmos-sync-daemon /opt/nmos-daemon/config/daemon_config.json
 Restart=always
 RestartSec=2
+TimeoutStopSec=30s
 
 [Install]
 WantedBy=multi-user.target

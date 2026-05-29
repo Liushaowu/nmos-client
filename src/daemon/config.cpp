@@ -68,6 +68,10 @@ DaemonConfig DaemonConfig::load_from_file(const std::string &file_path) {
   config.pull_timeout_ms = get_int_or(json, "pull_timeout_ms", 3000);
   config.reconnect_interval_ms =
       get_int_or(json, "reconnect_interval_ms", 1000);
+  config.ws_heartbeat_interval_ms =
+      get_int_or(json, "ws_heartbeat_interval_ms", 5000);
+  config.ws_heartbeat_timeout_ms =
+      get_int_or(json, "ws_heartbeat_timeout_ms", 15000);
   config.snapshot_debounce_ms =
       get_int_or(json, "snapshot_debounce_ms", 300);
   config.debug_http_url =

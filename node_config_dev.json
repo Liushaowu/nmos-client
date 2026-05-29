@@ -1,5 +1,5 @@
 {
-    "http_port": 2080,
+    "http_port": 1080,
     "configuration_port":-1,
     "events_port":-1,
     "control_protocol_ws_port":-1,
@@ -81,6 +81,6 @@
     "service_unavailable_retry_after": 5,
     "manufacturer_name": "SEEDER",
     "host_addresses":["192.168.123.195"],
-    "registry_address": "192.168.123.195",
+    "registry_address": "192.168.123.219",
     "registry_port":3210
 }

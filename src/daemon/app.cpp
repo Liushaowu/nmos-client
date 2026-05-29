@@ -142,19 +142,13 @@ App::App(std::string config_path) : config_path_(std::move(config_path)) {}
 
 App::~App() { stop(); }
 
-web::json::value App::node_config_json() const {
+web::json::value App::node_settings_json() const {
   if (!node_runtime_) {
     throw std::runtime_error("node runtime is not initialized");
   }
 
   std::lock_guard<std::mutex> lock(node_config_mutex_);
-  web::json::value result = web::json::value::object();
-  const auto persisted = node_runtime_->persisted_settings();
-  const auto effective = node_runtime_->effective_settings();
-  result[to_t("persisted")] = persisted;
-  result[to_t("effective")] = effective;
-  result[to_t("selected_registry")] = selected_registry_summary(persisted);
-  return result;
+  return node_runtime_->persisted_settings();
 }
 
 web::json::value App::available_registries_json() const {
@@ -191,7 +185,12 @@ web::json::value App::update_node_config(const web::json::value &patch,
     try {
       node_runtime_->write_persisted_settings(previous_persisted);
       restart_node_runtime();
+    } catch (const std::exception &rollback_error) {
+      std::cerr << "failed to roll back node config after restart failure: "
+                << rollback_error.what() << std::endl;
     } catch (...) {
+      std::cerr << "failed to roll back node config after restart failure"
+                << std::endl;
     }
     throw;
   }
@@ -230,7 +229,9 @@ int App::run() {
   snapshot_client_ =
       std::make_unique<SnapshotClient>(config_.snapshot_url, config_.pull_timeout_ms);
   ws_client_ =
-      std::make_unique<WsClient>(config_.ws_url, config_.reconnect_interval_ms);
+      std::make_unique<WsClient>(config_.ws_url, config_.reconnect_interval_ms,
+                                 config_.ws_heartbeat_interval_ms,
+                                 config_.ws_heartbeat_timeout_ms);
   http_debug_server_ =
       std::make_unique<HttpDebugServer>(config_.debug_http_url, *this, state_store_);
 
@@ -286,26 +287,45 @@ void App::stop() {
     return;
   }
 
+  const auto stop_started = std::chrono::steady_clock::now();
+  const auto log_elapsed = [&stop_started](const char *step) {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - stop_started);
+    std::cerr << "nmos-sync-daemon stop: " << step
+              << ", elapsed_ms=" << elapsed.count() << std::endl;
+  };
+
+  log_elapsed("begin");
+
   stop_requested_ = true;
   sync_cv_.notify_all();
 
   if (ws_client_) {
+    log_elapsed("stopping websocket client");
     ws_client_->stop();
+    log_elapsed("websocket client stopped");
   }
   if (sync_thread_.joinable()) {
+    log_elapsed("joining sync thread");
     sync_thread_.join();
+    log_elapsed("sync thread joined");
   }
   if (http_debug_server_) {
+    log_elapsed("stopping debug http server");
     http_debug_server_->stop();
+    log_elapsed("debug http server stopped");
   }
   if (node_runtime_) {
+    log_elapsed("stopping node runtime");
     set_node_state("stopping");
     node_runtime_->stop();
     set_node_state("stopped");
+    log_elapsed("node runtime stopped");
   }
 
   state_store_.set_daemon_state("stopped");
   started_ = false;
+  log_elapsed("complete");
 }
 
 void App::schedule_sync(std::int64_t revision) {

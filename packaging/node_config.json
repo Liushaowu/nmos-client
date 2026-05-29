@@ -1,5 +1,5 @@
 {
-    "http_port": 2080,
+    "http_port": 1080,
     "configuration_port": -1,
     "events_port": -1,
     "control_protocol_ws_port": -1,
@@ -8,7 +8,7 @@
     "domain": "local.",
     "node_tags": {
         "urn:x-nmos:tag:asset:product/v1.0": [
-            "NMOS Client"
+            "Seeder NMOS Device"
         ],
         "urn:x-nmos:tag:asset:manufacturer/v1.0": [
             "SEEDER"
@@ -19,7 +19,7 @@
     },
     "device_tags": {
         "urn:x-nmos:tag:asset:product/v1.0": [
-            "NMOS Client"
+            "Seeder NMOS Device"
         ],
         "urn:x-nmos:tag:asset:manufacturer/v1.0": [
             "SEEDER"
@@ -57,12 +57,10 @@
     "immediate_activation_max": 30,
     "events_heartbeat_interval": 5,
     "events_expiry_interval": 12,
-    "label": "NMOS Client",
-    "description": "NMOS Client",
+    "label": "Seeder NMOS Device",
+    "description": "Seeder NMOS Device",
     "no_trailing_dot_for_authorization_callback_uri": true,
     "service_unavailable_retry_after": 5,
     "manufacturer_name": "SEEDER",
-    "host_addresses": ["192.168.123.195"],
-    "registry_address": "192.168.123.195",
-    "registry_port": 3210
+    "host_addresses": ["192.168.123.195"]
 }

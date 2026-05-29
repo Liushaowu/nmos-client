@@ -10,6 +10,8 @@ struct DaemonConfig {
   std::string ws_url;
   int pull_timeout_ms = 3000;
   int reconnect_interval_ms = 1000;
+  int ws_heartbeat_interval_ms = 5000;
+  int ws_heartbeat_timeout_ms = 15000;
   int snapshot_debounce_ms = 300;
   std::string debug_http_url = "http:/" "/127.0.0.1:8081";
 

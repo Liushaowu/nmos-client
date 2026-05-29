@@ -24,8 +24,11 @@ public:
 
 private:
   void handle_get(web::http::http_request request);
+  void handle_post(web::http::http_request request);
   void handle_put(web::http::http_request request);
   void handle_patch(web::http::http_request request);
+  void handle_settings_update(web::http::http_request request,
+                              bool replace_entire_document);
 
   std::string url_;
   App &app_;

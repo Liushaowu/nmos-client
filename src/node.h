@@ -17,6 +17,7 @@ namespace seeder
     struct Redudancy
     {
       bool enable = false;
+      std::string source_ip;
       std::string ip;
       int port;
     };
@@ -46,7 +47,7 @@ namespace seeder
       bool enable = false;
       int channel_count;
       int bit_depth;
-      int simple_rate;
+      int sample_rate;
       std::string ip;
       int port;
       Redudancy redudancy;
@@ -81,7 +82,7 @@ namespace seeder
       bool enable = false;
       int channel_count;
       int bit_depth;
-      int simple_rate;
+      int sample_rate;
       double packet_time;
       std::string ip;
       std::string source_ip;
