@@ -33,10 +33,17 @@ namespace
 
   std::runtime_error invalid_field_error(const std::string &path,
                                          const std::string &expected,
-                                         const std::exception &error)
+                                         const std::string &detail)
   {
     return std::runtime_error("invalid JSON field '" + path + "': expected " +
-                              expected + ": " + error.what());
+                              expected + ": " + detail);
+  }
+
+  std::runtime_error invalid_field_error(const std::string &path,
+                                         const std::string &expected,
+                                         const std::exception &error)
+  {
+    return invalid_field_error(path, expected, error.what());
   }
 
   void require_field(const value &object, const utility::string_t &name)
@@ -45,6 +52,19 @@ namespace
     {
       throw std::runtime_error("missing required field: " + to_utf8(name));
     }
+  }
+
+  value require_array_field(const value &object, const char *name,
+                            const std::string &path_base = {})
+  {
+    const auto field = to_t(name);
+    const auto path = field_path(path_base, name);
+    require_field(object, field);
+    if (!object.at(field).is_array())
+    {
+      throw invalid_field_error(path, "array", "not an array");
+    }
+    return object.at(field);
   }
 
   std::string get_string_or(const value &object, const char *name,
@@ -167,13 +187,18 @@ namespace
   {
     const auto field = to_t(name);
     if (!object.is_object() || !object.has_field(field) ||
-        object.at(field).is_null() || !object.at(field).is_array())
+        object.at(field).is_null())
     {
       return {};
     }
 
-    std::vector<std::string> items;
     const auto path = field_path(path_base, name);
+    if (!object.at(field).is_array())
+    {
+      throw invalid_field_error(path, "array", "not an array");
+    }
+
+    std::vector<std::string> items;
     std::size_t index = 0;
     for (const auto &item : object.at(field).as_array())
     {
@@ -688,8 +713,8 @@ namespace seeder::nmos_sync
 
   SnapshotDto snapshot_from_json(const value &root)
   {
-    require_field(root, to_t("senders"));
-    require_field(root, to_t("receivers"));
+    const auto senders = require_array_field(root, "senders");
+    const auto receivers = require_array_field(root, "receivers");
 
     SnapshotDto snapshot;
     if (root.has_field(to_t("ptp_clock")))
@@ -697,10 +722,11 @@ namespace seeder::nmos_sync
       snapshot.ptp_clock.entries =
           ptp_entries_from_json(root.at(to_t("ptp_clock")), "ptp_clock");
     }
-    if (root.has_field(to_t("devices")) && root.at(to_t("devices")).is_array())
+    if (root.has_field(to_t("devices")) && !root.at(to_t("devices")).is_null())
     {
+      const auto devices = require_array_field(root, "devices");
       std::size_t index = 0;
-      for (const auto &device : root.at(to_t("devices")).as_array())
+      for (const auto &device : devices.as_array())
       {
         if (device.is_object())
         {
@@ -710,9 +736,6 @@ namespace seeder::nmos_sync
         ++index;
       }
     }
-
-    const auto &senders = root.at(to_t("senders"));
-    const auto &receivers = root.at(to_t("receivers"));
 
     std::size_t sender_index = 0;
     for (auto sender : senders.as_array())

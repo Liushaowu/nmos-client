@@ -26,6 +26,7 @@ public:
 
   int run();
   void stop();
+  void request_stop();
   web::json::value node_settings_json() const;
   web::json::value available_registries_json() const;
   web::json::value update_node_config(const web::json::value &patch,
@@ -45,6 +46,7 @@ private:
 
   std::string config_path_;
   std::atomic<bool> stop_requested_{false};
+  std::mutex stop_mutex_;
   bool started_{false};
 
   DaemonConfig config_;

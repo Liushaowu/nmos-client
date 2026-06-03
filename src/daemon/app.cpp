@@ -269,7 +269,10 @@ int App::run() {
 
   http_debug_server_->start();
 
-  started_ = true;
+  {
+    std::lock_guard<std::mutex> lock(stop_mutex_);
+    started_ = true;
+  }
   sync_thread_ = std::thread([this] { sync_loop(); });
   ws_client_->start();
   state_store_.set_daemon_state("connecting_ws");
@@ -282,7 +285,15 @@ int App::run() {
   return 0;
 }
 
+void App::request_stop() {
+  stop_requested_ = true;
+  sync_cv_.notify_all();
+}
+
 void App::stop() {
+  request_stop();
+
+  std::lock_guard<std::mutex> stop_lock(stop_mutex_);
   if (!started_) {
     return;
   }
@@ -296,9 +307,6 @@ void App::stop() {
   };
 
   log_elapsed("begin");
-
-  stop_requested_ = true;
-  sync_cv_.notify_all();
 
   if (ws_client_) {
     log_elapsed("stopping websocket client");

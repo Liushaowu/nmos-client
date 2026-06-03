@@ -141,6 +141,14 @@ namespace seeder
       void add_audio_receiver(AudioReceiver audio);
       void add_ancillary_receiver(AncillaryReceiver ancillary);
 
+      void update_video_sender(VideoSender video);
+      void update_audio_sender(AudioSender audio);
+      void update_ancillary_sender(AncillarySender ancillary);
+
+      void update_video_receiver(VideoReceiver video);
+      void update_audio_receiver(AudioReceiver audio);
+      void update_ancillary_receiver(AncillaryReceiver ancillary);
+
       void remove_video_sender(std::string id);
       void remove_audio_sender(std::string id);
       void remove_ancillary_sender(std::string id);

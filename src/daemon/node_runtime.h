@@ -47,6 +47,13 @@ public:
   void apply_audio_receiver(const nmos_node::AudioReceiver &receiver);
   void apply_ancillary_receiver(const nmos_node::AncillaryReceiver &receiver);
 
+  void update_video_sender(const nmos_node::VideoSender &sender);
+  void update_audio_sender(const nmos_node::AudioSender &sender);
+  void update_ancillary_sender(const nmos_node::AncillarySender &sender);
+  void update_video_receiver(const nmos_node::VideoReceiver &receiver);
+  void update_audio_receiver(const nmos_node::AudioReceiver &receiver);
+  void update_ancillary_receiver(const nmos_node::AncillaryReceiver &receiver);
+
   void remove_video_sender(const std::string &id);
   void remove_audio_sender(const std::string &id);
   void remove_ancillary_sender(const std::string &id);

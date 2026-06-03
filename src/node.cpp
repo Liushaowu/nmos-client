@@ -55,7 +55,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
+#include "nmos/lldp_manager.h"
+#include "lldp/lldp_manager.h"
 #include <nmos/id.h>
 #include <nmos/mutex.h>
 #include <algorithm>
@@ -1758,6 +1759,8 @@ namespace seeder
             nmos::get_host_interfaces(node_model_.settings);
         const auto interfaces =
             nmos::experimental::node_interfaces(host_interfaces);
+
+
         // example node
         {
           auto node = nmos::make_node(node_id, clocks,
@@ -1770,50 +1773,10 @@ namespace seeder
                                      std::move(node), *gate_, lock))
             throw node_implementation_init_exception("insert node failed!");
         }
-
-        // // prepare interface bindings for all senders and receivers
-        // const auto &host_address = nmos::fields::host_address(node_model_.settings);
-        // // the interface corresponding to the host address is used for the example
-        // // node's WebSocket senders and receivers
-        // const auto host_interface_ =
-        //     impl::find_interface(host_interfaces, host_address);
-        // if (host_interfaces.end() == host_interface_)
-        // {
-        //   slog::log<slog::severities::severe>(*gate_, SLOG_FLF)
-        //       << "No network interface corresponding to host_address?";
-        //   throw node_implementation_init_exception("find host interface failed!");
-        // }
-        // // hmm, should probably add a custom setting to control the primary and
-        // // secondary interfaces for the example node's RTP senders and receivers
-        // // rather than just picking the one(s) corresponding to the first and last
-        // // of the specified host addresses
-        // const auto &primary_address =
-        //     node_model_.settings.has_field(nmos::fields::host_addresses)
-        //         ? web::json::front(
-        //               nmos::fields::host_addresses(node_model_.settings))
-        //               .as_string()
-        //         : host_address;
-        // const auto &secondary_address =
-        //     node_model_.settings.has_field(nmos::fields::host_addresses)
-        //         ? web::json::back(
-        //               nmos::fields::host_addresses(node_model_.settings))
-        //               .as_string()
-        //         : host_address;
-        // const auto primary_interfaces =
-        //     impl::find_interface(host_interfaces, primary_address);
-        // const auto secondary_interfaces =
-        //     impl::find_interface(host_interfaces, secondary_address);
-        // if (host_interfaces.end() == primary_interfaces ||
-        //     host_interfaces.end() == secondary_interfaces)
-        // {
-        //   slog::log<slog::severities::severe>(*gate_, SLOG_FLF)
-        //       << "No network interface corresponding to one of the host_addresses?";
-        //   throw node_implementation_init_exception("insert interface failed!");
-        // }
-        // primary_interface = *primary_interfaces;
-        // secondary_interface = *secondary_interfaces;
-
-        // example device
+          slog::log<slog::severities::info>(*gate_, SLOG_FLF) << "Attempting to configure LLDP";
+          auto lldp_manager = nmos::experimental::make_lldp_manager(node_model_, interfaces, true, *gate_);
+          // hm, open may potentially throw?
+          lldp::lldp_manager_guard lldp_manager_guard(lldp_manager);
         {
           std::vector<nmos::id> empty;
           auto device = nmos::make_device(device_id, node_id, empty, empty,
@@ -1938,114 +1901,40 @@ namespace seeder
         {
           return;
         }
+        if (find_video_sender_by_id(video.id))
+        {
+          update_video_sender(video);
+          return;
+        }
         nmos::write_lock lock = node_model_.write_lock();
-        std::string id = video.id;
-        std::string name = video.name;
-        seeder::core::video_format_desc format_desc = seeder::core::video_format_desc::get(video.video_format);
-        if (format_desc.is_invalid())
-        {
-          throw node_implementation_init_exception(
-              "invalid video sender video_format: " + video.video_format);
-        }
-        if (video.pg_format < 0 ||
-            video.pg_format >= static_cast<int>(ST20_FMT_MAX))
-        {
-          throw node_implementation_init_exception(
-              "invalid video sender pg_format: " +
-              std::to_string(video.pg_format));
-        }
-
-        const auto sampling = st_get_color_sampling((st20_fmt)video.pg_format);
-        const auto bit_depth = st_get_component_depth((st20_fmt)video.pg_format);
-
-        const auto source_id =
-            impl::make_id(seed_id_, nmos::types::source, impl::ports::video, id);
-        const auto flow_id =
-            impl::make_id(seed_id_, nmos::types::flow, impl::ports::video, id);
-        const auto sender_id =
-            impl::make_id(seed_id_, nmos::types::sender, impl::ports::video, id);
-        bool ST_2022_7 = video.redudancy.enable;
+        auto resources = make_video_sender_resources(video);
+        const auto source_id = resources.source.id;
+        const auto flow_id = resources.flow.id;
+        const auto sender_id = resources.sender.id;
 
         erase_resource_if_present(node_model_.connection_resources, sender_id);
         erase_resource_if_present(node_model_.node_resources, sender_id);
         erase_resource_if_present(node_model_.node_resources, flow_id);
         erase_resource_if_present(node_model_.node_resources, source_id);
 
-        nmos::rational frame_rate = nmos::parse_rational(
-            web::json::value_of({{nmos::fields::numerator, format_desc.framerate.numerator()},
-                                 {nmos::fields::denominator, format_desc.framerate.denominator()}}));
-        nmos::colorspace colorspace = (nmos::colorspace)video.colorspace;
-        nmos::transfer_characteristic transfer_characteristic = (nmos::transfer_characteristic)video.transfer_characteristics;
-        nmos::resource source;
-
-        source = nmos::make_video_source(
-            source_id, device_id_, nmos::clock_names::clk0, frame_rate,
-            node_model_.settings); // 底层使用了 label 和 description 字段
-
-        impl::set_label_description(source, impl::ports::video, name);
-
-        nmos::interlace_mode interlace_mode =
-            format_desc.field_count == 2 ? nmos::interlace_modes::interlaced_tff
-                                         : nmos::interlace_modes::progressive;
-
-        nmos::resource flow;
-        flow = nmos::make_raw_video_flow(flow_id, source_id, device_id_, frame_rate,
-                                         format_desc.width, format_desc.height, interlace_mode,
-                                         colorspace, transfer_characteristic,
-                                         sampling, bit_depth, node_model_.settings);
-
-        impl::set_label_description(flow, impl::ports::video, name);
-
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(source), *gate_, lock))
+                                   std::move(resources.source), *gate_, lock))
           throw node_implementation_init_exception("add video sender source failed!");
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(flow), *gate_, lock))
+                                   std::move(resources.flow), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, source_id);
           throw node_implementation_init_exception("add video sender flow failed!");
         }
-
-        const auto manifest_href = nmos::experimental::make_manifest_api_manifest(
-            sender_id, node_model_.settings);
-        const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
-        auto sender = nmos::make_sender(sender_id, flow_id, nmos::transports::rtp_mcast,
-                                        device_id_, manifest_href.to_string(),
-                                        interface_names, node_model_.settings);
-        impl::set_label_description(sender, impl::ports::video, name);
-        impl::insert_group_hint(sender, impl::ports::video, id, name);
-
-        auto connection_sender =
-            nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
-        // add constraints;
-        connection_sender
-            .data[nmos::fields::endpoint_constraints][0][nmos::fields::source_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
-        if (ST_2022_7)
-          connection_sender.data[nmos::fields::endpoint_constraints][1]
-                                [nmos::fields::source_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
-        auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
-        staged[nmos::fields::master_enable] = value::boolean(true);
-        staged[nmos::fields::activation] =
-            value_of({{nmos::fields::mode,
-                       nmos::activation_modes::activate_scheduled_relative.name},
-                      {nmos::fields::requested_time, U("0:0")},
-                      {nmos::fields::activation_time, nmos::make_version()}});
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(sender), *gate_, lock))
+                                   std::move(resources.sender), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, flow_id);
           erase_resource_if_present(node_model_.node_resources, source_id);
           throw node_implementation_init_exception("add video sender failed!");
         }
         if (!insert_resource_after(delay_millis, node_model_.connection_resources,
-                                   std::move(connection_sender), *gate_, lock))
+                                   std::move(resources.connection_sender), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, sender_id);
           erase_resource_if_present(node_model_.node_resources, flow_id);
@@ -2070,22 +1959,16 @@ namespace seeder
         {
           return;
         }
+        if (find_audio_sender_by_id(audio.id))
+        {
+          update_audio_sender(audio);
+          return;
+        }
         nmos::write_lock lock = node_model_.write_lock();
-
-        nmos::rational frame_rate = nmos::parse_rational(web::json::value_of(
-            {{nmos::fields::numerator, audio.sample_rate},
-             {nmos::fields::denominator, 1}}));
-        ;
-        std::string id = audio.id;
-        std::string name = audio.name;
-        // audio
-        impl::port port = impl::ports::audio;
-
-        const auto source_id =
-            impl::make_id(seed_id_, nmos::types::source, port, id);
-        const auto flow_id = impl::make_id(seed_id_, nmos::types::flow, port, id);
-        const auto sender_id =
-            impl::make_id(seed_id_, nmos::types::sender, port, id);
+        auto resources = make_audio_sender_resources(audio);
+        const auto source_id = resources.source.id;
+        const auto flow_id = resources.flow.id;
+        const auto sender_id = resources.sender.id;
 
         erase_resource_if_present(node_model_.connection_resources, sender_id);
         erase_resource_if_present(node_model_.node_resources, sender_id);
@@ -2097,82 +1980,24 @@ namespace seeder
         erase_resource_if_present(node_model_.node_resources, flow_id);
         erase_resource_if_present(node_model_.node_resources, source_id);
 
-        const auto channels = boost::copy_range<std::vector<nmos::channel>>(
-            boost::irange(0, audio.channel_count) |
-            boost::adaptors::transformed([&](const int &index)
-                                         { return impl::channels_repeat[index %
-                                                                        (int)impl::channels_repeat.size()]; }));
-
-        int bit_depth = audio.bit_depth;
-        int sample_rate = audio.sample_rate;
-        nmos::resource source =
-            nmos::make_audio_source(source_id, device_id_, nmos::clock_names::clk0,
-                                    frame_rate, channels, node_model_.settings);
-        // impl::insert_parents(source, seed_id_, port, index);
-        impl::set_label_description(source, port, name);
-        nmos::resource flow =
-            nmos::make_raw_audio_flow(flow_id, source_id, device_id_, frame_rate,
-                                      bit_depth, node_model_.settings);
-
-        // impl::insert_parents(flow, seed_id_, port, index);
-        impl::set_label_description(flow, port, name);
-
-        // set_transportfile needs to find the matching source and flow for the
-        // sender, so insert these first
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(source), *gate_, lock))
+                                   std::move(resources.source), *gate_, lock))
           throw node_implementation_init_exception("add audio sender source failed!");
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(flow), *gate_, lock))
+                                   std::move(resources.flow), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, source_id);
           throw node_implementation_init_exception("add audio sender flow failed!");
         }
-
-        const auto manifest_href = nmos::experimental::make_manifest_api_manifest(
-            sender_id, node_model_.settings);
-        bool ST_2022_7 = audio.redudancy.enable;
-
-        const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
-        auto sender = nmos::make_sender(sender_id, flow_id, nmos::transports::rtp_mcast,
-                                        device_id_, manifest_href.to_string(),
-                                        interface_names, node_model_.settings);
-        impl::set_label_description(sender, port, name);
-        impl::insert_group_hint(sender, port, id, name);
-
-        auto connection_sender =
-            nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
-        // add constraints;
-        connection_sender
-            .data[nmos::fields::endpoint_constraints][0][nmos::fields::source_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
-        if (ST_2022_7)
-          connection_sender.data[nmos::fields::endpoint_constraints][1]
-                                [nmos::fields::source_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
-
-        // initialize this sender with a scheduled activation, e.g. to enable the
-        auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
-        staged[nmos::fields::master_enable] = value::boolean(true);
-        staged[nmos::fields::activation] =
-            value_of({{nmos::fields::mode,
-                       nmos::activation_modes::activate_scheduled_relative.name},
-                      {nmos::fields::requested_time, U("0:0")},
-                      {nmos::fields::activation_time, nmos::make_version()}});
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(sender), *gate_, lock))
+                                   std::move(resources.sender), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, flow_id);
           erase_resource_if_present(node_model_.node_resources, source_id);
           throw node_implementation_init_exception("insert audio sender failed!");
         }
         if (!insert_resource_after(delay_millis, node_model_.connection_resources,
-                                   std::move(connection_sender), *gate_, lock))
+                                   std::move(resources.connection_sender), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, sender_id);
           erase_resource_if_present(node_model_.node_resources, flow_id);
@@ -2197,99 +2022,35 @@ namespace seeder
         {
           return;
         }
-        nmos::write_lock lock = node_model_.write_lock();
-        std::string id = ancillary.id;
-        std::string name = ancillary.name;
-        impl::port port = impl::ports::data;
-        nmos::rational grain_rate = nmos::parse_rational(web::json::value_of(
-            {{nmos::fields::numerator, 50},
-             {nmos::fields::denominator, 1}}));
-        if (!ancillary.format.empty())
+        if (find_ancillary_sender_by_id(ancillary.id))
         {
-          try
-          {
-            const auto format_desc = seeder::core::video_format_desc::get(ancillary.format);
-            grain_rate = nmos::parse_rational(
-                web::json::value_of({{nmos::fields::numerator,
-                                      format_desc.framerate.numerator()},
-                                     {nmos::fields::denominator,
-                                      format_desc.framerate.denominator()}}));
-          }
-          catch (const std::exception &)
-          {
-          }
+          update_ancillary_sender(ancillary);
+          return;
         }
-
-        const auto source_id =
-            impl::make_id(seed_id_, nmos::types::source, port, id);
-        const auto flow_id = impl::make_id(seed_id_, nmos::types::flow, port, id);
-        const auto sender_id =
-            impl::make_id(seed_id_, nmos::types::sender, port, id);
-
-        nmos::resource source = nmos::make_data_source(
-            source_id, device_id_, nmos::clock_names::clk0, grain_rate,
-            node_model_.settings);
-        impl::set_label_description(source, port, name);
-
-        nmos::resource flow =
-            nmos::make_sdianc_data_flow(flow_id, source_id, device_id_,
-                                        node_model_.settings);
-        flow.data[nmos::fields::grain_rate] = nmos::make_rational(grain_rate);
-        impl::set_label_description(flow, port, name);
+        nmos::write_lock lock = node_model_.write_lock();
+        auto resources = make_ancillary_sender_resources(ancillary);
+        const auto source_id = resources.source.id;
+        const auto flow_id = resources.flow.id;
+        const auto sender_id = resources.sender.id;
 
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(source), *gate_, lock))
+                                   std::move(resources.source), *gate_, lock))
           throw node_implementation_init_exception(" add ancillary sender source failed!");
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(flow), *gate_, lock))
+                                   std::move(resources.flow), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, source_id);
           throw node_implementation_init_exception("add ancillary sender flow failed!");
         }
-
-        const auto manifest_href = nmos::experimental::make_manifest_api_manifest(
-            sender_id, node_model_.settings);
-        const bool ST_2022_7 = ancillary.redudancy.enable;
-        const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
-        auto sender = nmos::make_sender(sender_id, flow_id, nmos::transports::rtp_mcast,
-                                        device_id_, manifest_href.to_string(),
-                                        interface_names, node_model_.settings);
-        impl::set_label_description(sender, port, name);
-        impl::insert_group_hint(sender, port, id, name);
-
-        auto connection_sender =
-            nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
-        connection_sender
-            .data[nmos::fields::endpoint_constraints][0][nmos::fields::source_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
-        if (ST_2022_7)
-        {
-          connection_sender.data[nmos::fields::endpoint_constraints][1]
-                                [nmos::fields::source_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
-        }
-        auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
-        staged[nmos::fields::master_enable] = value::boolean(true);
-        staged[nmos::fields::activation] =
-            value_of({{nmos::fields::mode,
-                       nmos::activation_modes::activate_scheduled_relative.name},
-                      {nmos::fields::requested_time, U("0:0")},
-                      {nmos::fields::activation_time, nmos::make_version()}});
-
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(sender), *gate_, lock))
+                                   std::move(resources.sender), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, flow_id);
           erase_resource_if_present(node_model_.node_resources, source_id);
           throw node_implementation_init_exception("add ancillary sender failed!");
         }
         if (!insert_resource_after(delay_millis, node_model_.connection_resources,
-                                   std::move(connection_sender), *gate_, lock))
+                                   std::move(resources.connection_sender), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, sender_id);
           erase_resource_if_present(node_model_.node_resources, flow_id);
@@ -2318,143 +2079,28 @@ namespace seeder
         {
           return;
         }
+        bool exists = false;
+        {
+          std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+          exists = nullptr != find_video_receiver_by_id(video.id);
+        }
+        if (exists)
+        {
+          update_video_receiver(video);
+          return;
+        }
         nmos::write_lock lock = node_model_.write_lock();
-        std::string id = video.id;
-        std::string name = video.name;
-        bool ST_2022_7 = video.redudancy.enable;
-        const auto receiver_id =
-            impl::make_id(seed_id_, nmos::types::receiver, impl::ports::video, id);
-        const auto primary_interface_ip =
-            receiver_interface_ip_or_default(video.source_ip, primary_interface);
-        const auto secondary_interface_ip = first_interface_address(secondary_interface);
-        const auto secondary_multicast_ip =
-            receiver_multicast_ip_or_default(video.redudancy.ip, video.ip);
-        const auto secondary_port =
-            receiver_port_or_default(video.redudancy.port, video.port);
-        const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
+        auto resources = make_video_receiver_resources(video);
+        const auto receiver_id = resources.receiver.id;
 
         erase_resource_if_present(node_model_.connection_resources, receiver_id);
         erase_resource_if_present(node_model_.node_resources, receiver_id);
 
-        nmos::resource receiver;
-        receiver = nmos::make_receiver(
-            receiver_id, device_id_, nmos::transports::rtp_mcast, interface_names,
-            nmos::formats::video, {nmos::media_types::video_raw},
-            node_model_.settings);
-        std::vector<web::json::value> constraint_sets;
-        const auto colorspaces = to_utility_string_vector(video.caps.colorspaces);
-        const auto transfer_characteristics =
-            to_utility_string_vector(video.caps.transfer_characteristics);
-        for (const auto &format : video.caps.formats)
-        {
-          seeder::core::video_format_desc format_desc = seeder::core::video_format_desc::get(format);
-          const auto interlace_modes =
-              format_desc.field_count == 2 ? std::vector<
-                                                 utility::string_t>{nmos::interlace_modes::interlaced_bff.name,
-                                                                    nmos::interlace_modes::interlaced_tff.name,
-                                                                    nmos::interlace_modes::interlaced_psf.name}
-                                           : std::vector<utility::string_t>{
-                                                 nmos::interlace_modes::progressive.name};
-
-          web::json::value constraint_set = value_of(
-              {{nmos::caps::format::grain_rate, nmos::make_caps_rational_constraint({nmos::parse_rational(web::json::value_of({{nmos::fields::numerator, format_desc.framerate.numerator()},
-                                                                                                                               {nmos::fields::denominator, format_desc.framerate.denominator()}}))})},
-               {nmos::caps::format::frame_width, nmos::make_caps_integer_constraint({format_desc.width})},
-               {nmos::caps::format::frame_height, nmos::make_caps_integer_constraint({format_desc.height})},
-               {nmos::caps::format::interlace_mode, nmos::make_caps_string_constraint(interlace_modes)}});
-
-          if (!colorspaces.empty())
-          {
-            constraint_set[nmos::caps::format::colorspace] =
-                nmos::make_caps_string_constraint(colorspaces);
-          }
-
-          if (!transfer_characteristics.empty())
-          {
-            constraint_set[nmos::caps::format::transfer_characteristic] =
-                nmos::make_caps_string_constraint(transfer_characteristics);
-          }
-
-          constraint_sets.push_back(std::move(constraint_set));
-        }
-
-        if (constraint_sets.empty() &&
-            (!colorspaces.empty() || !transfer_characteristics.empty()))
-        {
-          web::json::value constraint_set = value::object();
-
-          if (!colorspaces.empty())
-          {
-            constraint_set[nmos::caps::format::colorspace] =
-                nmos::make_caps_string_constraint(colorspaces);
-          }
-
-          if (!transfer_characteristics.empty())
-          {
-            constraint_set[nmos::caps::format::transfer_characteristic] =
-                nmos::make_caps_string_constraint(transfer_characteristics);
-          }
-
-          constraint_sets.push_back(std::move(constraint_set));
-        }
-
-        if (!constraint_sets.empty())
-        {
-
-          receiver.data[nmos::fields::caps][nmos::fields::constraint_sets] =
-              value_from_elements(constraint_sets);
-          std::string caps_json = receiver.data[nmos::fields::caps][nmos::fields::constraint_sets].serialize();
-          // printf("receiver caps: %s\n", caps_json.c_str());
-        }
-
-        receiver.data[nmos::fields::version] =
-            receiver.data[nmos::fields::caps][nmos::fields::version] =
-                value(nmos::make_version());
-        impl::set_label_description(receiver, impl::ports::video, name);
-        impl::insert_group_hint(receiver, impl::ports::video, id, name);
-        auto connection_receiver =
-            nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
-        connection_receiver.data[nmos::fields::endpoint_constraints][0]
-                                [nmos::fields::interface_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
-
-        // connection_receiver
-        //     .data[nmos::fields::endpoint_active][nmos::fields::transport_params]
-        //          [nmos::fields::source_ip] = value(video.source_ip);
-        auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
-        auto &active = connection_receiver.data[nmos::fields::endpoint_active];
-        staged[nmos::fields::master_enable] = value::boolean(true);
-        active[nmos::fields::master_enable] = value::boolean(true);
-        if (ST_2022_7)
-        {
-          initialize_receiver_transport_params(
-              staged, active, video.ip, primary_interface_ip, video.port,
-              secondary_multicast_ip, secondary_interface_ip, secondary_port);
-        }
-        else
-        {
-          initialize_receiver_transport_params(staged, active, video.ip,
-                                               primary_interface_ip,
-                                               video.port);
-        }
-
-        if (ST_2022_7)
-          connection_receiver.data[nmos::fields::endpoint_constraints][1]
-                                  [nmos::fields::interface_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
-        // resolve_auto(receiver, connection_receiver,
-        //              connection_receiver.data[nmos::fields::endpoint_active]
-        //                                      [nmos::fields::transport_params]);
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(receiver), *gate_, lock))
+                                   std::move(resources.receiver), *gate_, lock))
           throw node_implementation_init_exception("insert video receiver failed!");
         if (!insert_resource_after(delay_millis, node_model_.connection_resources,
-                                   std::move(connection_receiver), *gate_, lock))
+                                   std::move(resources.connection_receiver), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, receiver_id);
           throw node_implementation_init_exception("insert video connection receiver failed!");
@@ -2477,136 +2123,30 @@ namespace seeder
         {
           return;
         }
+        bool exists = false;
+        {
+          std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+          exists = nullptr != find_audio_receiver_by_id(audio.id);
+        }
+        if (exists)
+        {
+          update_audio_receiver(audio);
+          return;
+        }
         nmos::write_lock lock = node_model_.write_lock();
-        std::string id = audio.id;
-        std::string name = audio.name;
-        bool ST_2022_7 = audio.redudancy.enable;
-        int bit_depth = audio.bit_depth;
-        const auto primary_interface_ip =
-            receiver_interface_ip_or_default(audio.source_ip, primary_interface);
-        const auto secondary_interface_ip = first_interface_address(secondary_interface);
-        const auto secondary_multicast_ip =
-            receiver_multicast_ip_or_default(audio.redudancy.ip, audio.ip);
-        const auto secondary_port =
-            receiver_port_or_default(audio.redudancy.port, audio.port);
-        const auto receiver_id =
-            impl::make_id(seed_id_, nmos::types::receiver, impl::ports::audio, id);
-        const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
+        auto resources = make_audio_receiver_resources(audio);
+        const auto receiver_id = resources.receiver.id;
 
         erase_resource_if_present(node_model_.connection_resources, receiver_id);
         erase_resource_if_present(node_model_.node_resources, receiver_id);
 
-        nmos::resource receiver = nmos::make_audio_receiver(
-            receiver_id, device_id_, nmos::transports::rtp_mcast, interface_names,
-            bit_depth, node_model_.settings);
-
-        int sample_rate =
-            audio
-                .sample_rate; // st30_get_sample_rate(session->info.audio_sampling);
-        double packet_time = audio.packet_time;
-        // (double)st30_get_packet_time(session->info.audio_ptime) / 1000000;
-
-        // web::json::value audio_constraint_set = value::object();
-        // bool has_audio_caps = false;
-
-        // if (audio.channel_count > 0)
-        // {
-        //   audio_constraint_set[nmos::caps::format::channel_count] =
-        //       nmos::make_caps_integer_constraint({}, 1, audio.channel_count);
-        //   has_audio_caps = true;
-        // }
-
-        // if (sample_rate > 0)
-        // {
-        //   audio_constraint_set[nmos::caps::format::sample_rate] =
-        //       nmos::make_caps_rational_constraint({nmos::rational{sample_rate, 1}});
-        //   has_audio_caps = true;
-        // }
-
-        // if (bit_depth > 0)
-        // {
-        //   audio_constraint_set[nmos::caps::format::sample_depth] =
-        //       nmos::make_caps_integer_constraint({bit_depth});
-        //   has_audio_caps = true;
-        // }
-
-        // if (packet_time > 0.0)
-        // {
-        //   audio_constraint_set[nmos::caps::transport::packet_time] =
-        //       nmos::make_caps_number_constraint({packet_time});
-        //   has_audio_caps = true;
-        // }
-
-        // if (has_audio_caps)
-        // {
-        //   web::json::value audio_constraint_sets = value::array();
-        //   audio_constraint_sets[0] = std::move(audio_constraint_set);
-        //   receiver.data[nmos::fields::caps][nmos::fields::constraint_sets] =
-        //       std::move(audio_constraint_sets);
-        // }
-        // if (has_audio_caps)
-        // {
-        // receiver.data[nmos::fields::version] =
-        //     receiver.data[nmos::fields::caps][nmos::fields::version] =
-        //         value(nmos::make_version());
-        // }
-        impl::set_label_description(receiver, impl::ports::audio, name);
-        impl::insert_group_hint(receiver, impl::ports::audio, id, name);
-
-        auto connection_receiver =
-            nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
-        // add some example constraints; these should be completed fully!
-        // connection_receiver
-        //     .data[nmos::fields::endpoint_constraints][0][nmos::fields::interface_ip]
-        //     = value_of({{nmos::fields::constraint_enum,
-        //                value_from_elements(primary_interface.addresses)}});
-        // if (ST_2022_7) {
-        //   connection_receiver.data[nmos::fields::endpoint_constraints][1]
-        //                           [nmos::fields::interface_ip] =
-        //       value_of({{nmos::fields::constraint_enum,
-        //                  value_from_elements(secondary_interface.addresses)}});
-        // }
-        connection_receiver.data[nmos::fields::endpoint_constraints][0]
-                                [nmos::fields::interface_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
-        auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
-        auto &active = connection_receiver.data[nmos::fields::endpoint_active];
-        staged[nmos::fields::master_enable] = value::boolean(true);
-        active[nmos::fields::master_enable] = value::boolean(true);
-        if (ST_2022_7)
-        {
-          initialize_receiver_transport_params(
-              staged, active, audio.ip, primary_interface_ip, audio.port,
-              secondary_multicast_ip, secondary_interface_ip, secondary_port);
-        }
-        else
-        {
-          initialize_receiver_transport_params(staged, active, audio.ip,
-                                               primary_interface_ip,
-                                               audio.port);
-        }
-        if (ST_2022_7)
-        {
-          connection_receiver.data[nmos::fields::endpoint_constraints][1]
-                                  [nmos::fields::interface_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
-        }
-        // receiver_audio_session_map_.emplace(connection_receiver.id, audio);
-        // resolve_auto(receiver, connection_receiver,
-        //              connection_receiver.data[nmos::fields::endpoint_active]
-        //                                      [nmos::fields::transport_params]);
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(receiver), *gate_, lock))
+                                   std::move(resources.receiver), *gate_, lock))
         {
           throw node_implementation_init_exception("add audio receiver failed!");
         }
         if (!insert_resource_after(delay_millis, node_model_.connection_resources,
-                                   std::move(connection_receiver), *gate_, lock))
+                                   std::move(resources.connection_receiver), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, receiver_id);
           throw node_implementation_init_exception("add audio receiver connection failed!");
@@ -2630,74 +2170,30 @@ namespace seeder
         {
           return;
         }
+        bool exists = false;
+        {
+          std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+          exists = nullptr != find_ancillary_receiver_by_id(ancillary.id);
+        }
+        if (exists)
+        {
+          update_ancillary_receiver(ancillary);
+          return;
+        }
         nmos::write_lock lock = node_model_.write_lock();
-        std::string id = ancillary.id;
-        std::string name = ancillary.name;
-        const bool ST_2022_7 = ancillary.redudancy.enable;
-        const auto primary_interface_ip = receiver_interface_ip_or_default(
-            ancillary.source_ip, primary_interface);
-        const auto secondary_interface_ip = first_interface_address(secondary_interface);
-        const auto secondary_multicast_ip = receiver_multicast_ip_or_default(
-            ancillary.redudancy.ip, ancillary.ip);
-        const auto secondary_port = receiver_port_or_default(
-            ancillary.redudancy.port, ancillary.port);
-        const auto receiver_id =
-            impl::make_id(seed_id_, nmos::types::receiver, impl::ports::data, id);
-        const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
+        auto resources = make_ancillary_receiver_resources(ancillary);
+        const auto receiver_id = resources.receiver.id;
 
         erase_resource_if_present(node_model_.connection_resources, receiver_id);
         erase_resource_if_present(node_model_.node_resources, receiver_id);
 
-        nmos::resource receiver = nmos::make_sdianc_data_receiver(
-            receiver_id, device_id_, nmos::transports::rtp_mcast, interface_names,
-            node_model_.settings);
-        receiver.data[nmos::fields::version] =
-            receiver.data[nmos::fields::caps][nmos::fields::version] =
-                value(nmos::make_version());
-        impl::set_label_description(receiver, impl::ports::data, name);
-        impl::insert_group_hint(receiver, impl::ports::data, id, name);
-
-        auto connection_receiver =
-            nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
-        connection_receiver.data[nmos::fields::endpoint_constraints][0]
-                                [nmos::fields::interface_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
-        auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
-        auto &active = connection_receiver.data[nmos::fields::endpoint_active];
-        staged[nmos::fields::master_enable] = value::boolean(true);
-        active[nmos::fields::master_enable] = value::boolean(true);
-        if (ST_2022_7)
-        {
-          initialize_receiver_transport_params(
-              staged, active, ancillary.ip, primary_interface_ip,
-              ancillary.port, secondary_multicast_ip,
-              secondary_interface_ip, secondary_port);
-        }
-        else
-        {
-          initialize_receiver_transport_params(staged, active, ancillary.ip,
-                                               primary_interface_ip,
-                                               ancillary.port);
-        }
-        if (ST_2022_7)
-        {
-          connection_receiver.data[nmos::fields::endpoint_constraints][1]
-                                  [nmos::fields::interface_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
-        }
-
         if (!insert_resource_after(delay_millis, node_model_.node_resources,
-                                   std::move(receiver), *gate_, lock))
+                                   std::move(resources.receiver), *gate_, lock))
         {
           throw node_implementation_init_exception("add ancillary receiver failed!");
         }
         if (!insert_resource_after(delay_millis, node_model_.connection_resources,
-                                   std::move(connection_receiver), *gate_, lock))
+                                   std::move(resources.connection_receiver), *gate_, lock))
         {
           erase_resource_if_present(node_model_.node_resources, receiver_id);
           throw node_implementation_init_exception("add ancillary receiver connection failed!");
@@ -2975,38 +2471,808 @@ namespace seeder
                               *gate_, lock);
         remove_ancillary_receiver_by_id(id);
       }
+      struct SenderResources
+      {
+        nmos::resource source;
+        nmos::resource flow;
+        nmos::resource sender;
+        nmos::resource connection_sender;
+      };
+
+      struct ReceiverResources
+      {
+        nmos::resource receiver;
+        nmos::resource connection_receiver;
+      };
+
+      template <typename Stream>
+      bool replace_cached_by_id(std::vector<Stream> &streams,
+                                const Stream &replacement)
+      {
+        for (auto &stream : streams)
+        {
+          if (stream.id == replacement.id)
+          {
+            stream = replacement;
+            return true;
+          }
+        }
+        return false;
+      }
+
+      bool replace_node_resource(nmos::resource replacement)
+      {
+        const auto resource_id = replacement.id;
+        return nmos::modify_resource(
+            node_model_.node_resources, resource_id,
+            [&](nmos::resource &resource)
+            {
+              resource = std::move(replacement);
+            });
+      }
+
+      bool replace_connection_resource(nmos::resource replacement)
+      {
+        const auto resource_id = replacement.id;
+        return nmos::modify_resource(
+            node_model_.connection_resources, resource_id,
+            [&](nmos::resource &resource)
+            {
+              resource = std::move(replacement);
+            });
+      }
+
+      bool active_leg_count_matches(
+          const web::json::value &endpoint_active,
+          const bool st2022_7) const
+      {
+        if (!endpoint_active.is_object() ||
+            !endpoint_active.has_field(nmos::fields::transport_params))
+        {
+          return false;
+        }
+
+        const auto &transport_params =
+            nmos::fields::transport_params(endpoint_active);
+        return transport_params.is_array() &&
+               transport_params.as_array().size() == (st2022_7 ? 2 : 1);
+      }
+
+      void replace_sender_resources(const std::string &description,
+                                    SenderResources resources,
+                                    const bool st2022_7)
+      {
+        const auto sender_id = resources.sender.id;
+        const bool source_updated =
+            replace_node_resource(std::move(resources.source));
+        const bool flow_updated = replace_node_resource(std::move(resources.flow));
+        const bool sender_updated =
+            replace_node_resource(std::move(resources.sender));
+
+        if (!source_updated || !flow_updated || !sender_updated)
+        {
+          throw node_implementation_init_exception(
+              description + " resource update failed!");
+        }
+
+        const bool connection_updated = nmos::modify_resource(
+            node_model_.connection_resources, sender_id,
+            [&](nmos::resource &connection_sender)
+            {
+              if (connection_sender.data.has_field(
+                      nmos::fields::endpoint_active))
+              {
+                const auto &endpoint_active =
+                    nmos::fields::endpoint_active(connection_sender.data);
+                if (active_leg_count_matches(endpoint_active, st2022_7))
+                {
+                  resources.connection_sender
+                      .data[nmos::fields::endpoint_active] = endpoint_active;
+                }
+              }
+              connection_sender = std::move(resources.connection_sender);
+              auto sender = nmos::find_resource(
+                  node_model_.node_resources,
+                  {sender_id, nmos::types::sender});
+              if (node_model_.node_resources.end() == sender)
+              {
+                throw node_implementation_init_exception(
+                    description + " sender transportfile update failed!");
+              }
+
+              auto &endpoint_transportfile =
+                  connection_sender.data[nmos::fields::endpoint_transportfile];
+              set_transportfile(*sender, connection_sender,
+                                endpoint_transportfile);
+            });
+
+        if (!connection_updated)
+        {
+          throw node_implementation_init_exception(
+              description + " connection update failed!");
+        }
+      }
+
+      void replace_receiver_resources(const std::string &description,
+                                      ReceiverResources resources,
+                                      const bool st2022_7)
+      {
+        const auto receiver_id = resources.receiver.id;
+        const bool receiver_updated =
+            replace_node_resource(std::move(resources.receiver));
+        if (!receiver_updated)
+        {
+          throw node_implementation_init_exception(
+              description + " resource update failed!");
+        }
+
+        const bool connection_updated = nmos::modify_resource(
+            node_model_.connection_resources, receiver_id,
+            [&](nmos::resource &connection_receiver)
+            {
+              if (connection_receiver.data.has_field(
+                      nmos::fields::endpoint_active))
+              {
+                const auto &endpoint_active =
+                    nmos::fields::endpoint_active(connection_receiver.data);
+                if (active_leg_count_matches(endpoint_active,
+                                                      st2022_7))
+                {
+                  resources.connection_receiver
+                      .data[nmos::fields::endpoint_active] = endpoint_active;
+                }
+              }
+              connection_receiver = std::move(resources.connection_receiver);
+            });
+
+        if (!connection_updated)
+        {
+          throw node_implementation_init_exception(
+              description + " connection update failed!");
+        }
+      }
+
+      SenderResources make_video_sender_resources(const VideoSender &video)
+      {
+        std::string id = video.id;
+        std::string name = video.name;
+        seeder::core::video_format_desc format_desc =
+            seeder::core::video_format_desc::get(video.video_format);
+        if (format_desc.is_invalid())
+        {
+          throw node_implementation_init_exception(
+              "invalid video sender video_format: " + video.video_format);
+        }
+        if (video.pg_format < 0 ||
+            video.pg_format >= static_cast<int>(ST20_FMT_MAX))
+        {
+          throw node_implementation_init_exception(
+              "invalid video sender pg_format: " +
+              std::to_string(video.pg_format));
+        }
+
+        const auto sampling = st_get_color_sampling((st20_fmt)video.pg_format);
+        const auto bit_depth = st_get_component_depth((st20_fmt)video.pg_format);
+        const auto source_id = impl::make_id(
+            seed_id_, nmos::types::source, impl::ports::video, id);
+        const auto flow_id = impl::make_id(
+            seed_id_, nmos::types::flow, impl::ports::video, id);
+        const auto sender_id = impl::make_id(
+            seed_id_, nmos::types::sender, impl::ports::video, id);
+        const bool ST_2022_7 = video.redudancy.enable;
+
+        nmos::rational frame_rate = nmos::parse_rational(
+            web::json::value_of({{nmos::fields::numerator,
+                                  format_desc.framerate.numerator()},
+                                 {nmos::fields::denominator,
+                                  format_desc.framerate.denominator()}}));
+        nmos::colorspace colorspace =
+            (nmos::colorspace)video.colorspace;
+        nmos::transfer_characteristic transfer_characteristic =
+            (nmos::transfer_characteristic)video.transfer_characteristics;
+        nmos::resource source = nmos::make_video_source(
+            source_id, device_id_, nmos::clock_names::clk0, frame_rate,
+            node_model_.settings);
+        impl::set_label_description(source, impl::ports::video, name);
+
+        nmos::interlace_mode interlace_mode =
+            format_desc.field_count == 2 ? nmos::interlace_modes::interlaced_tff
+                                         : nmos::interlace_modes::progressive;
+        nmos::resource flow = nmos::make_raw_video_flow(
+            flow_id, source_id, device_id_, frame_rate, format_desc.width,
+            format_desc.height, interlace_mode, colorspace,
+            transfer_characteristic, sampling, bit_depth, node_model_.settings);
+        impl::set_label_description(flow, impl::ports::video, name);
+
+        const auto manifest_href =
+            nmos::experimental::make_manifest_api_manifest(
+                sender_id, node_model_.settings);
+        const auto interface_names =
+            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
+                                                       secondary_interface.name}
+                      : std::vector<utility::string_t>{primary_interface.name};
+        auto sender = nmos::make_sender(
+            sender_id, flow_id, nmos::transports::rtp_mcast, device_id_,
+            manifest_href.to_string(), interface_names, node_model_.settings);
+        impl::set_label_description(sender, impl::ports::video, name);
+        impl::insert_group_hint(sender, impl::ports::video, id, name);
+
+        auto connection_sender =
+            nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
+        connection_sender
+            .data[nmos::fields::endpoint_constraints][0][nmos::fields::source_ip] =
+            value_of({{nmos::fields::constraint_enum,
+                       value_from_elements(primary_interface.addresses)}});
+        if (ST_2022_7)
+        {
+          connection_sender.data[nmos::fields::endpoint_constraints][1]
+                                [nmos::fields::source_ip] =
+              value_of({{nmos::fields::constraint_enum,
+                         value_from_elements(secondary_interface.addresses)}});
+        }
+        auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
+        staged[nmos::fields::master_enable] = value::boolean(true);
+        staged[nmos::fields::activation] =
+            value_of({{nmos::fields::mode,
+                       nmos::activation_modes::activate_scheduled_relative.name},
+                      {nmos::fields::requested_time, U("0:0")},
+                      {nmos::fields::activation_time, nmos::make_version()}});
+
+        return {std::move(source), std::move(flow), std::move(sender),
+                std::move(connection_sender)};
+      }
+
+      SenderResources make_audio_sender_resources(const AudioSender &audio)
+      {
+        nmos::rational frame_rate = nmos::parse_rational(
+            web::json::value_of({{nmos::fields::numerator, audio.sample_rate},
+                                 {nmos::fields::denominator, 1}}));
+        std::string id = audio.id;
+        std::string name = audio.name;
+        const impl::port port = impl::ports::audio;
+        const auto source_id =
+            impl::make_id(seed_id_, nmos::types::source, port, id);
+        const auto flow_id =
+            impl::make_id(seed_id_, nmos::types::flow, port, id);
+        const auto sender_id =
+            impl::make_id(seed_id_, nmos::types::sender, port, id);
+
+        const auto channels = boost::copy_range<std::vector<nmos::channel>>(
+            boost::irange(0, audio.channel_count) |
+            boost::adaptors::transformed(
+                [&](const int &index)
+                {
+                  return impl::channels_repeat[index %
+                                               (int)impl::channels_repeat.size()];
+                }));
+
+        nmos::resource source = nmos::make_audio_source(
+            source_id, device_id_, nmos::clock_names::clk0, frame_rate, channels,
+            node_model_.settings);
+        impl::set_label_description(source, port, name);
+        nmos::resource flow = nmos::make_raw_audio_flow(
+            flow_id, source_id, device_id_, frame_rate, audio.bit_depth,
+            node_model_.settings);
+        impl::set_label_description(flow, port, name);
+
+        const auto manifest_href =
+            nmos::experimental::make_manifest_api_manifest(
+                sender_id, node_model_.settings);
+        const bool ST_2022_7 = audio.redudancy.enable;
+        const auto interface_names =
+            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
+                                                       secondary_interface.name}
+                      : std::vector<utility::string_t>{primary_interface.name};
+        auto sender = nmos::make_sender(
+            sender_id, flow_id, nmos::transports::rtp_mcast, device_id_,
+            manifest_href.to_string(), interface_names, node_model_.settings);
+        impl::set_label_description(sender, port, name);
+        impl::insert_group_hint(sender, port, id, name);
+
+        auto connection_sender =
+            nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
+        connection_sender
+            .data[nmos::fields::endpoint_constraints][0][nmos::fields::source_ip] =
+            value_of({{nmos::fields::constraint_enum,
+                       value_from_elements(primary_interface.addresses)}});
+        if (ST_2022_7)
+        {
+          connection_sender.data[nmos::fields::endpoint_constraints][1]
+                                [nmos::fields::source_ip] =
+              value_of({{nmos::fields::constraint_enum,
+                         value_from_elements(secondary_interface.addresses)}});
+        }
+        auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
+        staged[nmos::fields::master_enable] = value::boolean(true);
+        staged[nmos::fields::activation] =
+            value_of({{nmos::fields::mode,
+                       nmos::activation_modes::activate_scheduled_relative.name},
+                      {nmos::fields::requested_time, U("0:0")},
+                      {nmos::fields::activation_time, nmos::make_version()}});
+
+        return {std::move(source), std::move(flow), std::move(sender),
+                std::move(connection_sender)};
+      }
+
+      SenderResources make_ancillary_sender_resources(
+          const AncillarySender &ancillary)
+      {
+        std::string id = ancillary.id;
+        std::string name = ancillary.name;
+        const impl::port port = impl::ports::data;
+        nmos::rational grain_rate = nmos::parse_rational(
+            web::json::value_of({{nmos::fields::numerator, 50},
+                                 {nmos::fields::denominator, 1}}));
+        if (!ancillary.format.empty())
+        {
+          try
+          {
+            const auto format_desc =
+                seeder::core::video_format_desc::get(ancillary.format);
+            grain_rate = nmos::parse_rational(
+                web::json::value_of({{nmos::fields::numerator,
+                                      format_desc.framerate.numerator()},
+                                     {nmos::fields::denominator,
+                                      format_desc.framerate.denominator()}}));
+          }
+          catch (const std::exception &)
+          {
+          }
+        }
+
+        const auto source_id =
+            impl::make_id(seed_id_, nmos::types::source, port, id);
+        const auto flow_id =
+            impl::make_id(seed_id_, nmos::types::flow, port, id);
+        const auto sender_id =
+            impl::make_id(seed_id_, nmos::types::sender, port, id);
+
+        nmos::resource source = nmos::make_data_source(
+            source_id, device_id_, nmos::clock_names::clk0, grain_rate,
+            node_model_.settings);
+        impl::set_label_description(source, port, name);
+        nmos::resource flow = nmos::make_sdianc_data_flow(
+            flow_id, source_id, device_id_, node_model_.settings);
+        flow.data[nmos::fields::grain_rate] = nmos::make_rational(grain_rate);
+        impl::set_label_description(flow, port, name);
+
+        const auto manifest_href =
+            nmos::experimental::make_manifest_api_manifest(
+                sender_id, node_model_.settings);
+        const bool ST_2022_7 = ancillary.redudancy.enable;
+        const auto interface_names =
+            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
+                                                       secondary_interface.name}
+                      : std::vector<utility::string_t>{primary_interface.name};
+        auto sender = nmos::make_sender(
+            sender_id, flow_id, nmos::transports::rtp_mcast, device_id_,
+            manifest_href.to_string(), interface_names, node_model_.settings);
+        impl::set_label_description(sender, port, name);
+        impl::insert_group_hint(sender, port, id, name);
+
+        auto connection_sender =
+            nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
+        connection_sender
+            .data[nmos::fields::endpoint_constraints][0][nmos::fields::source_ip] =
+            value_of({{nmos::fields::constraint_enum,
+                       value_from_elements(primary_interface.addresses)}});
+        if (ST_2022_7)
+        {
+          connection_sender.data[nmos::fields::endpoint_constraints][1]
+                                [nmos::fields::source_ip] =
+              value_of({{nmos::fields::constraint_enum,
+                         value_from_elements(secondary_interface.addresses)}});
+        }
+        auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
+        staged[nmos::fields::master_enable] = value::boolean(true);
+        staged[nmos::fields::activation] =
+            value_of({{nmos::fields::mode,
+                       nmos::activation_modes::activate_scheduled_relative.name},
+                      {nmos::fields::requested_time, U("0:0")},
+                      {nmos::fields::activation_time, nmos::make_version()}});
+
+        return {std::move(source), std::move(flow), std::move(sender),
+                std::move(connection_sender)};
+      }
+
+      ReceiverResources make_video_receiver_resources(const VideoReceiver &video)
+      {
+        std::string id = video.id;
+        std::string name = video.name;
+        const bool ST_2022_7 = video.redudancy.enable;
+        const auto receiver_id = make_video_receiver_resource_id(id);
+        const auto primary_interface_ip =
+            receiver_interface_ip_or_default(video.source_ip, primary_interface);
+        const auto secondary_interface_ip =
+            first_interface_address(secondary_interface);
+        const auto secondary_multicast_ip =
+            receiver_multicast_ip_or_default(video.redudancy.ip, video.ip);
+        const auto secondary_port =
+            receiver_port_or_default(video.redudancy.port, video.port);
+        const auto interface_names =
+            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
+                                                       secondary_interface.name}
+                      : std::vector<utility::string_t>{primary_interface.name};
+
+        nmos::resource receiver = nmos::make_receiver(
+            receiver_id, device_id_, nmos::transports::rtp_mcast,
+            interface_names, nmos::formats::video, {nmos::media_types::video_raw},
+            node_model_.settings);
+        std::vector<web::json::value> constraint_sets;
+        const auto colorspaces = to_utility_string_vector(video.caps.colorspaces);
+        const auto transfer_characteristics =
+            to_utility_string_vector(video.caps.transfer_characteristics);
+        for (const auto &format : video.caps.formats)
+        {
+          seeder::core::video_format_desc format_desc =
+              seeder::core::video_format_desc::get(format);
+          const auto interlace_modes =
+              format_desc.field_count == 2
+                  ? std::vector<utility::string_t>{
+                        nmos::interlace_modes::interlaced_bff.name,
+                        nmos::interlace_modes::interlaced_tff.name,
+                        nmos::interlace_modes::interlaced_psf.name}
+                  : std::vector<utility::string_t>{
+                        nmos::interlace_modes::progressive.name};
+
+          web::json::value constraint_set = value_of(
+              {{nmos::caps::format::grain_rate,
+                nmos::make_caps_rational_constraint({nmos::parse_rational(
+                    web::json::value_of(
+                        {{nmos::fields::numerator,
+                          format_desc.framerate.numerator()},
+                         {nmos::fields::denominator,
+                          format_desc.framerate.denominator()}}))})},
+               {nmos::caps::format::frame_width,
+                nmos::make_caps_integer_constraint({format_desc.width})},
+               {nmos::caps::format::frame_height,
+                nmos::make_caps_integer_constraint({format_desc.height})},
+               {nmos::caps::format::interlace_mode,
+                nmos::make_caps_string_constraint(interlace_modes)}});
+
+          if (!colorspaces.empty())
+          {
+            constraint_set[nmos::caps::format::colorspace] =
+                nmos::make_caps_string_constraint(colorspaces);
+          }
+          if (!transfer_characteristics.empty())
+          {
+            constraint_set[nmos::caps::format::transfer_characteristic] =
+                nmos::make_caps_string_constraint(transfer_characteristics);
+          }
+          constraint_sets.push_back(std::move(constraint_set));
+        }
+
+        if (constraint_sets.empty() &&
+            (!colorspaces.empty() || !transfer_characteristics.empty()))
+        {
+          web::json::value constraint_set = value::object();
+          if (!colorspaces.empty())
+          {
+            constraint_set[nmos::caps::format::colorspace] =
+                nmos::make_caps_string_constraint(colorspaces);
+          }
+          if (!transfer_characteristics.empty())
+          {
+            constraint_set[nmos::caps::format::transfer_characteristic] =
+                nmos::make_caps_string_constraint(transfer_characteristics);
+          }
+          constraint_sets.push_back(std::move(constraint_set));
+        }
+
+        if (!constraint_sets.empty())
+        {
+          receiver.data[nmos::fields::caps][nmos::fields::constraint_sets] =
+              value_from_elements(constraint_sets);
+        }
+
+        receiver.data[nmos::fields::version] =
+            receiver.data[nmos::fields::caps][nmos::fields::version] =
+                value(nmos::make_version());
+        impl::set_label_description(receiver, impl::ports::video, name);
+        impl::insert_group_hint(receiver, impl::ports::video, id, name);
+
+        auto connection_receiver =
+            nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
+        connection_receiver.data[nmos::fields::endpoint_constraints][0]
+                                [nmos::fields::interface_ip] =
+            value_of({{nmos::fields::constraint_enum,
+                       value_from_elements(primary_interface.addresses)}});
+        auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
+        auto &active = connection_receiver.data[nmos::fields::endpoint_active];
+        staged[nmos::fields::master_enable] = value::boolean(true);
+        active[nmos::fields::master_enable] = value::boolean(true);
+        if (ST_2022_7)
+        {
+          initialize_receiver_transport_params(
+              staged, active, video.ip, primary_interface_ip, video.port,
+              secondary_multicast_ip, secondary_interface_ip, secondary_port);
+          connection_receiver.data[nmos::fields::endpoint_constraints][1]
+                                  [nmos::fields::interface_ip] =
+              value_of({{nmos::fields::constraint_enum,
+                         value_from_elements(secondary_interface.addresses)}});
+        }
+        else
+        {
+          initialize_receiver_transport_params(staged, active, video.ip,
+                                               primary_interface_ip, video.port);
+        }
+
+        return {std::move(receiver), std::move(connection_receiver)};
+      }
+
+      ReceiverResources make_audio_receiver_resources(const AudioReceiver &audio)
+      {
+        std::string id = audio.id;
+        std::string name = audio.name;
+        const bool ST_2022_7 = audio.redudancy.enable;
+        const auto primary_interface_ip =
+            receiver_interface_ip_or_default(audio.source_ip, primary_interface);
+        const auto secondary_interface_ip =
+            first_interface_address(secondary_interface);
+        const auto secondary_multicast_ip =
+            receiver_multicast_ip_or_default(audio.redudancy.ip, audio.ip);
+        const auto secondary_port =
+            receiver_port_or_default(audio.redudancy.port, audio.port);
+        const auto receiver_id = make_audio_receiver_resource_id(id);
+        const auto interface_names =
+            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
+                                                       secondary_interface.name}
+                      : std::vector<utility::string_t>{primary_interface.name};
+
+        nmos::resource receiver = nmos::make_audio_receiver(
+            receiver_id, device_id_, nmos::transports::rtp_mcast,
+            interface_names, audio.bit_depth, node_model_.settings);
+        impl::set_label_description(receiver, impl::ports::audio, name);
+        impl::insert_group_hint(receiver, impl::ports::audio, id, name);
+
+        auto connection_receiver =
+            nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
+        connection_receiver.data[nmos::fields::endpoint_constraints][0]
+                                [nmos::fields::interface_ip] =
+            value_of({{nmos::fields::constraint_enum,
+                       value_from_elements(primary_interface.addresses)}});
+        auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
+        auto &active = connection_receiver.data[nmos::fields::endpoint_active];
+        staged[nmos::fields::master_enable] = value::boolean(true);
+        active[nmos::fields::master_enable] = value::boolean(true);
+        if (ST_2022_7)
+        {
+          initialize_receiver_transport_params(
+              staged, active, audio.ip, primary_interface_ip, audio.port,
+              secondary_multicast_ip, secondary_interface_ip, secondary_port);
+          connection_receiver.data[nmos::fields::endpoint_constraints][1]
+                                  [nmos::fields::interface_ip] =
+              value_of({{nmos::fields::constraint_enum,
+                         value_from_elements(secondary_interface.addresses)}});
+        }
+        else
+        {
+          initialize_receiver_transport_params(staged, active, audio.ip,
+                                               primary_interface_ip, audio.port);
+        }
+
+        return {std::move(receiver), std::move(connection_receiver)};
+      }
+
+      ReceiverResources make_ancillary_receiver_resources(
+          const AncillaryReceiver &ancillary)
+      {
+        std::string id = ancillary.id;
+        std::string name = ancillary.name;
+        const bool ST_2022_7 = ancillary.redudancy.enable;
+        const auto primary_interface_ip = receiver_interface_ip_or_default(
+            ancillary.source_ip, primary_interface);
+        const auto secondary_interface_ip =
+            first_interface_address(secondary_interface);
+        const auto secondary_multicast_ip = receiver_multicast_ip_or_default(
+            ancillary.redudancy.ip, ancillary.ip);
+        const auto secondary_port =
+            receiver_port_or_default(ancillary.redudancy.port, ancillary.port);
+        const auto receiver_id = make_ancillary_receiver_resource_id(id);
+        const auto interface_names =
+            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
+                                                       secondary_interface.name}
+                      : std::vector<utility::string_t>{primary_interface.name};
+
+        nmos::resource receiver = nmos::make_sdianc_data_receiver(
+            receiver_id, device_id_, nmos::transports::rtp_mcast,
+            interface_names, node_model_.settings);
+        receiver.data[nmos::fields::version] =
+            receiver.data[nmos::fields::caps][nmos::fields::version] =
+                value(nmos::make_version());
+        impl::set_label_description(receiver, impl::ports::data, name);
+        impl::insert_group_hint(receiver, impl::ports::data, id, name);
+
+        auto connection_receiver =
+            nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
+        connection_receiver.data[nmos::fields::endpoint_constraints][0]
+                                [nmos::fields::interface_ip] =
+            value_of({{nmos::fields::constraint_enum,
+                       value_from_elements(primary_interface.addresses)}});
+        auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
+        auto &active = connection_receiver.data[nmos::fields::endpoint_active];
+        staged[nmos::fields::master_enable] = value::boolean(true);
+        active[nmos::fields::master_enable] = value::boolean(true);
+        if (ST_2022_7)
+        {
+          initialize_receiver_transport_params(
+              staged, active, ancillary.ip, primary_interface_ip,
+              ancillary.port, secondary_multicast_ip, secondary_interface_ip,
+              secondary_port);
+          connection_receiver.data[nmos::fields::endpoint_constraints][1]
+                                  [nmos::fields::interface_ip] =
+              value_of({{nmos::fields::constraint_enum,
+                         value_from_elements(secondary_interface.addresses)}});
+        }
+        else
+        {
+          initialize_receiver_transport_params(staged, active, ancillary.ip,
+                                               primary_interface_ip,
+                                               ancillary.port);
+        }
+
+        return {std::move(receiver), std::move(connection_receiver)};
+      }
+
       void update_video_sender(VideoSender video)
       {
-        remove_video_sender(video.id);
-        add_video_sender(video);
+        if (!video.enable)
+        {
+          remove_video_sender(video.id);
+          return;
+        }
+        if (!find_video_sender_by_id(video.id))
+        {
+          add_video_sender(video);
+          return;
+        }
+
+        nmos::write_lock lock = node_model_.write_lock();
+        const auto sender_id = impl::make_id(
+            seed_id_, nmos::types::sender, impl::ports::video, video.id);
+        auto resources = make_video_sender_resources(video);
+        replace_sender_resources("update video sender", std::move(resources),
+                                  video.redudancy.enable);
+        video.sender_id = sender_id;
+        replace_cached_by_id(video_senders, video);
+        node_model_.notify();
       }
+
       void update_audio_sender(AudioSender audio)
       {
-        remove_audio_sender(audio.id);
-        add_audio_sender(audio);
+        if (!audio.enable)
+        {
+          remove_audio_sender(audio.id);
+          return;
+        }
+        if (!find_audio_sender_by_id(audio.id))
+        {
+          add_audio_sender(audio);
+          return;
+        }
+
+        nmos::write_lock lock = node_model_.write_lock();
+        const auto sender_id = impl::make_id(
+            seed_id_, nmos::types::sender, impl::ports::audio, audio.id);
+        auto resources = make_audio_sender_resources(audio);
+        replace_sender_resources("update audio sender", std::move(resources),
+                                  audio.redudancy.enable);
+        audio.sender_id = sender_id;
+        replace_cached_by_id(audio_senders, audio);
+        node_model_.notify();
       }
 
       void update_video_receiver(VideoReceiver video)
       {
-        remove_video_receiver(video.id);
-        add_video_receiver(video);
+        if (!video.enable)
+        {
+          remove_video_receiver(video.id);
+          return;
+        }
+        bool exists = false;
+        {
+          std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+          exists = nullptr != find_video_receiver_by_id(video.id);
+        }
+        if (!exists)
+        {
+          add_video_receiver(video);
+          return;
+        }
+
+        nmos::write_lock lock = node_model_.write_lock();
+        auto resources = make_video_receiver_resources(video);
+        replace_receiver_resources("update video receiver", std::move(resources),
+                                   video.redudancy.enable);
+        {
+          std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+          replace_cached_by_id(video_receivers, video);
+        }
+        node_model_.notify();
       }
+
       void update_audio_receiver(AudioReceiver audio)
       {
-        remove_audio_receiver(audio.id);
-        add_audio_receiver(audio);
+        if (!audio.enable)
+        {
+          remove_audio_receiver(audio.id);
+          return;
+        }
+        bool exists = false;
+        {
+          std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+          exists = nullptr != find_audio_receiver_by_id(audio.id);
+        }
+        if (!exists)
+        {
+          add_audio_receiver(audio);
+          return;
+        }
+
+        nmos::write_lock lock = node_model_.write_lock();
+        auto resources = make_audio_receiver_resources(audio);
+        replace_receiver_resources("update audio receiver", std::move(resources),
+                                   audio.redudancy.enable);
+        {
+          std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+          replace_cached_by_id(audio_receivers, audio);
+        }
+        node_model_.notify();
       }
 
       void update_ancillary_sender(AncillarySender ancillary)
       {
-        remove_ancillary_sender(ancillary.id);
-        add_ancillary_sender(ancillary);
+        if (!ancillary.enable)
+        {
+          remove_ancillary_sender(ancillary.id);
+          return;
+        }
+        if (!find_ancillary_sender_by_id(ancillary.id))
+        {
+          add_ancillary_sender(ancillary);
+          return;
+        }
+
+        nmos::write_lock lock = node_model_.write_lock();
+        const auto sender_id = impl::make_id(
+            seed_id_, nmos::types::sender, impl::ports::data, ancillary.id);
+        auto resources = make_ancillary_sender_resources(ancillary);
+        replace_sender_resources("update ancillary sender", std::move(resources),
+                                  ancillary.redudancy.enable);
+        ancillary.sender_id = sender_id;
+        replace_cached_by_id(ancillary_senders, ancillary);
+        node_model_.notify();
       }
 
       void update_ancillary_receiver(AncillaryReceiver ancillary)
       {
-        remove_ancillary_receiver(ancillary.id);
-        add_ancillary_receiver(ancillary);
+        if (!ancillary.enable)
+        {
+          remove_ancillary_receiver(ancillary.id);
+          return;
+        }
+        bool exists = false;
+        {
+          std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+          exists = nullptr != find_ancillary_receiver_by_id(ancillary.id);
+        }
+        if (!exists)
+        {
+          add_ancillary_receiver(ancillary);
+          return;
+        }
+
+        nmos::write_lock lock = node_model_.write_lock();
+        auto resources = make_ancillary_receiver_resources(ancillary);
+        replace_receiver_resources("update ancillary receiver",
+                                   std::move(resources),
+                                   ancillary.redudancy.enable);
+        {
+          std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+          replace_cached_by_id(ancillary_receivers, ancillary);
+        }
+        node_model_.notify();
       }
 
       void set_update_video_receiver_callback(
@@ -3585,6 +3851,19 @@ namespace seeder
       p_impl->remove_ancillary_sender(id);
     }
 
+    void Node::update_video_sender(VideoSender video)
+    {
+      p_impl->update_video_sender(video);
+    }
+    void Node::update_audio_sender(AudioSender audio)
+    {
+      p_impl->update_audio_sender(audio);
+    }
+    void Node::update_ancillary_sender(AncillarySender ancillary)
+    {
+      p_impl->update_ancillary_sender(ancillary);
+    }
+
     void Node::add_video_receiver(VideoReceiver video)
     {
       p_impl->add_video_receiver(video);
@@ -3609,6 +3888,19 @@ namespace seeder
     void Node::remove_ancillary_receiver(std::string id)
     {
       p_impl->remove_ancillary_receiver(id);
+    }
+
+    void Node::update_video_receiver(VideoReceiver video)
+    {
+      p_impl->update_video_receiver(video);
+    }
+    void Node::update_audio_receiver(AudioReceiver audio)
+    {
+      p_impl->update_audio_receiver(audio);
+    }
+    void Node::update_ancillary_receiver(AncillaryReceiver ancillary)
+    {
+      p_impl->update_ancillary_receiver(ancillary);
     }
 
     void Node::set_update_video_receiver_callback(

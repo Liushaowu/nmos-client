@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
       std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
-    app.stop();
+    app.request_stop();
     runner.join();
     return 0;
   } catch (const std::exception &error) {

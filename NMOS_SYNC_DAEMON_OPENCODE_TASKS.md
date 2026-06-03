@@ -370,7 +370,7 @@ Node 启动完成后，不主动拉取 snapshot，而是等待 wsClient 收到�
 **操作类型**
 - add
 - remove
-- update（按 remove + add 执行）
+- update（same-id 内容变化时执行显式 update 或原地资源变更）
 - ptp_update
 - remove_all_streams
 
@@ -396,7 +396,7 @@ Node 启动完成后，不主动拉取 snapshot，而是等待 wsClient 收到�
 - update
 
 **要求**
-- update 使用 remove + add 实现
+- 缺失 ID 执行 remove，新 ID 执行 add，same-id 内容变化执行 update，完全等价则 no-op
 - 失败时记录具体资源 id 和类型
 
 **完成定义**
@@ -415,7 +415,7 @@ Node 启动完成后，不主动拉取 snapshot，而是等待 wsClient 收到�
 - update
 
 **要求**
-- update 使用 remove + add 实现
+- 缺失 ID 执行 remove，新 ID 执行 add，same-id 内容变化执行 update，完全等价则 no-op
 - 注意 receiver observed callback 可能在 apply 后触发
 
 **完成定义**

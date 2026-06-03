@@ -112,6 +112,34 @@ void NodeRuntime::apply_ancillary_receiver(
   node_.add_ancillary_receiver(receiver);
 }
 
+void NodeRuntime::update_video_sender(const nmos_node::VideoSender &sender) {
+  node_.update_video_sender(sender);
+}
+
+void NodeRuntime::update_audio_sender(const nmos_node::AudioSender &sender) {
+  node_.update_audio_sender(sender);
+}
+
+void NodeRuntime::update_ancillary_sender(
+    const nmos_node::AncillarySender &sender) {
+  node_.update_ancillary_sender(sender);
+}
+
+void NodeRuntime::update_video_receiver(
+    const nmos_node::VideoReceiver &receiver) {
+  node_.update_video_receiver(receiver);
+}
+
+void NodeRuntime::update_audio_receiver(
+    const nmos_node::AudioReceiver &receiver) {
+  node_.update_audio_receiver(receiver);
+}
+
+void NodeRuntime::update_ancillary_receiver(
+    const nmos_node::AncillaryReceiver &receiver) {
+  node_.update_ancillary_receiver(receiver);
+}
+
 void NodeRuntime::remove_video_sender(const std::string &id) {
   node_.remove_video_sender(id);
 }
