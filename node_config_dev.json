@@ -81,6 +81,7 @@
     "service_unavailable_retry_after": 5,
     "manufacturer_name": "SEEDER",
     "host_addresses":["192.168.123.195"],
+    "interfaces":["eno1"],
     "registry_address": "192.168.123.219",
     "registry_port":3210
 }

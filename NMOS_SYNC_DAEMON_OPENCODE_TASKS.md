@@ -110,7 +110,7 @@ src/daemon/http_debug_server.cpp
 - 新目标可独立编译
 
 **完成定义**
-- `cmake --build build` 能生成 `nmos-sync-daemon`
+- `cmake --workflow --preset debug` 能生成 `nmos-sync-daemon`
 
 ### Task 1.2：新增 daemon 入口文件
 **目标**
@@ -688,7 +688,7 @@ WS 断开后自动重连。
 
 ### Task 10.5：构建与静态验证
 **验收**
-- `cmake --build build` 通过
+- `cmake --workflow --preset debug` 通过
 - 所有新增文件无明显编译错误
 - 不破坏现有库和 demo 编译
 

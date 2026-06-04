@@ -83,7 +83,7 @@ Implementation-level details are maintained in `src/AGENTS.md`; this map stays r
 ## COMMANDS
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build
+cmake --workflow --preset debug
 cmake --install build
 ```
 

@@ -250,7 +250,7 @@ namespace
     entry.offset = get_double_or(object, "offset", 0.0, path);
     entry.offset_scaled_log_variance =
         get_int_or(object, "offset_scaled_log_variance", 0, path);
-    entry.t1_domain_number = get_int_or(object, "t1_domain_number", 0, path);
+    entry.t1_domain_number = get_int_or(object, "t1_domain_number", 127, path);
     return entry;
   }
 
@@ -697,6 +697,20 @@ namespace seeder::nmos_sync
       }
     }
     return false;
+  }
+
+  int PtpClockDto::effective_ptp_domain() const
+  {
+    for (const auto &entry : entries)
+    {
+      if (entry.is_active && entry.is_connected && entry.master_initialized)
+      {
+        return 0 <= entry.t1_domain_number && entry.t1_domain_number <= 127
+                   ? entry.t1_domain_number
+                   : 127;
+      }
+    }
+    return 127;
   }
 
   bool PtpClockDto::empty() const

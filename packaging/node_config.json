@@ -62,5 +62,6 @@
     "no_trailing_dot_for_authorization_callback_uri": true,
     "service_unavailable_retry_after": 5,
     "manufacturer_name": "SEEDER",
-    "host_addresses": ["192.168.123.195"]
+    "host_addresses": ["192.168.123.195"],
+    "interfaces": ["eno1"]
 }

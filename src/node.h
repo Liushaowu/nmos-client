@@ -173,7 +173,7 @@ namespace seeder
           const web::hosts::experimental::host_interface &primary,
           const web::hosts::experimental::host_interface &secondary);
 
-      void set_ptp_clock(std::string gmtid, bool locked);
+      void set_ptp_clock(std::string gmtid, bool locked, int ptp_domain = 127);
     };
   } // namespace nmos_node
 } // namespace seeder

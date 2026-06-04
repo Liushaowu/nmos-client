@@ -53,7 +53,8 @@ void NodeRuntime::set_registration_event_handler(
 
 void NodeRuntime::set_ptp_clock(const PtpClockDto &ptp_clock) {
   node_.set_ptp_clock(ptp_clock.effective_gmid(),
-                      ptp_clock.effective_locked());
+                      ptp_clock.effective_locked(),
+                      ptp_clock.effective_ptp_domain());
 }
 
 void NodeRuntime::set_runtime_devices(

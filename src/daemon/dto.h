@@ -26,7 +26,7 @@ struct PtpClockDto {
     int master_utc_offset = 0;
     double offset = 0.0;
     int offset_scaled_log_variance = 0;
-    int t1_domain_number = 0;
+    int t1_domain_number = 127;
 
     bool operator==(const Entry &other) const {
       return clock_accuracy == other.clock_accuracy &&
@@ -50,6 +50,7 @@ struct PtpClockDto {
 
   std::string effective_gmid() const;
   bool effective_locked() const;
+  int effective_ptp_domain() const;
   bool empty() const;
 };
 

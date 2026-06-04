@@ -17,21 +17,26 @@
 #include "nmos/server.h"
 #include "nmos/server_utils.h" // for make_http_listener_config
 #include "node_implementation.h"
+#include <arpa/inet.h>
 #include <asm-generic/errno.h>
 #include <atomic>
 #include <cmath>
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <cpprest/details/basic_types.h>
 #include <cpprest/json.h>
 #include <cpprest/json_ops.h>
 #include <cpprest/json_utils.h>
 #include <functional>
+#include <ifaddrs.h>
 #include <iostream>
 #include <mutex>
+#include <netinet/in.h>
 #include <optional>
 #include <fstream>
 #include <sstream>
+#include <sys/socket.h>
 #include <thread>
 #include <nmos/capabilities.h>
 #include <nmos/connection_api.h>
@@ -69,6 +74,151 @@ namespace
   std::string to_utf8_string(const utility::string_t &value)
   {
     return utility::conversions::to_utf8string(value);
+  }
+
+  bool is_ipv4_literal(const std::string &value)
+  {
+    in_addr address{};
+    return 1 == inet_pton(AF_INET, value.c_str(), &address);
+  }
+
+  std::string resolve_interface_ipv4_address(const std::string &interface_name)
+  {
+    ifaddrs *interfaces = nullptr;
+    if (0 != getifaddrs(&interfaces))
+    {
+      throw std::runtime_error(
+          "Failed to enumerate network interfaces while resolving interfaces entry '" +
+          interface_name + "': " + std::strerror(errno));
+    }
+
+    std::string resolved_address;
+    for (auto interface = interfaces; nullptr != interface; interface = interface->ifa_next)
+    {
+      if (nullptr == interface->ifa_addr || nullptr == interface->ifa_name ||
+          interface_name != interface->ifa_name ||
+          AF_INET != interface->ifa_addr->sa_family)
+      {
+        continue;
+      }
+
+      char address_buffer[INET_ADDRSTRLEN] = {};
+      const auto *socket_address =
+          reinterpret_cast<const sockaddr_in *>(interface->ifa_addr);
+      if (nullptr == inet_ntop(AF_INET, &socket_address->sin_addr,
+                               address_buffer, sizeof(address_buffer)))
+      {
+        freeifaddrs(interfaces);
+        throw std::runtime_error(
+            "Failed to convert IPv4 address for interfaces entry '" +
+            interface_name + "'");
+      }
+
+      resolved_address = address_buffer;
+      break;
+    }
+
+    freeifaddrs(interfaces);
+    return resolved_address;
+  }
+
+  void set_host_addresses(web::json::value &settings,
+                          const std::vector<std::string> &host_addresses)
+  {
+    auto normalized_host_addresses =
+        web::json::value::array(host_addresses.size());
+    for (size_t index = 0; index < host_addresses.size(); ++index)
+    {
+      normalized_host_addresses[index] = web::json::value::string(
+          utility::s2us(host_addresses[index]));
+    }
+
+    settings[utility::s2us("host_addresses")] = normalized_host_addresses;
+    if (!host_addresses.empty())
+    {
+      settings[utility::s2us("host_address")] = web::json::value::string(
+          utility::s2us(host_addresses.front()));
+    }
+  }
+
+  void append_unique_host_address(std::vector<std::string> &host_addresses,
+                                  const std::string &host_address)
+  {
+    if (host_addresses.end() == std::find(host_addresses.begin(),
+                                          host_addresses.end(), host_address))
+    {
+      host_addresses.push_back(host_address);
+    }
+  }
+
+  void apply_interface_host_addresses(web::json::value &settings)
+  {
+    const auto host_addresses_field = utility::s2us("host_addresses");
+    const auto interfaces_field = utility::s2us("interfaces");
+    if (!settings.is_object())
+    {
+      return;
+    }
+
+    std::vector<std::string> resolved_host_addresses;
+    if (settings.has_field(host_addresses_field))
+    {
+      const auto &host_addresses = settings.at(host_addresses_field);
+      if (!host_addresses.is_array())
+      {
+        return;
+      }
+
+      for (const auto &host_address : host_addresses.as_array())
+      {
+        if (!host_address.is_string())
+        {
+          throw std::runtime_error("host_addresses entries must be IPv4 strings");
+        }
+
+        const auto host_address_text = to_utf8_string(host_address.as_string());
+        if (!is_ipv4_literal(host_address_text))
+        {
+          throw std::runtime_error(
+              "host_addresses entry '" + host_address_text +
+              "' is not a valid IPv4 address; use interfaces for Linux interface names");
+        }
+
+        append_unique_host_address(resolved_host_addresses, host_address_text);
+      }
+    }
+
+    if (settings.has_field(interfaces_field))
+    {
+      const auto &interface_names = settings.at(interfaces_field);
+      if (!interface_names.is_array())
+      {
+        return;
+      }
+
+      for (const auto &interface_name : interface_names.as_array())
+      {
+        if (!interface_name.is_string())
+        {
+          throw std::runtime_error("interfaces entries must be Linux interface names");
+        }
+
+        const auto interface_name_text = to_utf8_string(interface_name.as_string());
+        const auto resolved_address =
+            resolve_interface_ipv4_address(interface_name_text);
+        if (resolved_address.empty())
+        {
+          continue;
+        }
+
+        append_unique_host_address(resolved_host_addresses, resolved_address);
+      }
+    }
+
+    if (!resolved_host_addresses.empty())
+    {
+      set_host_addresses(settings, resolved_host_addresses);
+    }
   }
 
   std::string colorimetry_to_string(const sdp::colorimetry &value)
@@ -622,6 +772,7 @@ namespace seeder
       bool stop_requested_{false};
       std::atomic<LifecycleState> lifecycle_state_{LifecycleState::stopped};
       bool needs_model_reset_{false};
+      int ptp_domain_number_ = 127;
 
       std::function<void(const VideoReceiver &video)> update_video_receiver_func;
       std::function<void(const AudioReceiver &audio)> update_audio_receiver_func;
@@ -1279,7 +1430,7 @@ namespace seeder
                         error.what() + ", flow=" + flow->data.serialize() +
                         ", sender=" + sender.data.serialize());
                   }
-                  const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, 127);
+                  const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, ptp_domain_number_);
                   return nmos::make_video_raw_sdp_parameters(
                       session_name, raw_params, nmos::details::payload_type_video_default, mids, ts_refclk);
                 }
@@ -1290,22 +1441,24 @@ namespace seeder
                 double packet_time = 1;
 
                 auto audio_L_params = nmos::make_audio_L_parameters(node->data, source->data, flow->data, sender.data, packet_time);
-                const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, 127);
+                const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, ptp_domain_number_);
                 return nmos::make_audio_L_sdp_parameters(session_name, audio_L_params, nmos::details::payload_type_audio_default, mids, ts_refclk);
               }
               else if (nmos::formats::data == format)
               {
                 auto samp291_params = nmos::make_video_smpte291_parameters(node->data, source->data, flow->data, sender.data, nmos::vpid_codes::vpid_1_5Gbps_1080_line, sdp::transmission_models::compatible);
+               const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, ptp_domain_number_);
                 return nmos::make_video_smpte291_sdp_parameters(
                     session_name, samp291_params,
-                    nmos::details::payload_type_data_default, mids, {});
+                    nmos::details::payload_type_data_default, mids, ts_refclk);
               }
               else if (nmos::formats::mux == format)
               {
                 auto SMPTE2022_6_params = nmos::make_video_SMPTE2022_6_parameters(node->data, source->data, flow->data, sender.data, sdp::type_parameters::type_N);
+                const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, ptp_domain_number_);
                 return nmos::make_video_SMPTE2022_6_sdp_parameters(
                     session_name, SMPTE2022_6_params,
-                    nmos::details::payload_type_mux_default, mids, {});
+                    nmos::details::payload_type_mux_default, mids, ts_refclk);
               }
               else
               {
@@ -1475,6 +1628,7 @@ namespace seeder
 
           // Prepare run-time default settings (different than header defaults)
 
+          apply_interface_host_addresses(node_model_.settings);
           nmos::insert_node_default_settings(node_model_.settings);
 
           // copy to the logging settings
@@ -1750,8 +1904,8 @@ namespace seeder
         const auto device_id = impl::make_id(seed_id, nmos::types::device);
         node_id_ = node_id;
         device_id_ = device_id;
-        seed_id_ = seed_id;
-        const auto clocks = web::json::value_of({nmos::make_internal_clock(nmos::clock_names::clk0)});
+        seed_id_ = seed_id;                                                                            
+        const auto clocks = web::json::value_of({nmos::make_ptp_clock(nmos::clock_names::clk0, false, "00-00-00-00-00-00-00-00", false)});
 
         // filter network interfaces to those that correspond to the specified
         // host_addresses
@@ -1766,6 +1920,8 @@ namespace seeder
           auto node = nmos::make_node(node_id, clocks,
                                       nmos::make_node_interfaces(interfaces),
                                       node_model_.settings);
+          const auto& interfaces = node.data[nmos::fields::interfaces];
+        slog::log<slog::severities::info>(*gate_, SLOG_FLF) << "node interfaces : "<<  interfaces.serialize();
           utility::string_t clocks = node.data[nmos::fields::clocks].serialize();
           node.data[nmos::fields::tags] =
               impl::fields::node_tags(node_model_.settings);
@@ -1789,17 +1945,20 @@ namespace seeder
         }
       }
 
-      void set_ptp_clock(std::string gmid_, bool locked_)
+      void set_ptp_clock(std::string gmid_, bool locked_, int ptp_domain)
       {
         const auto normalized_gmid = normalize_ptp_gmid(gmid_);
         auto lock = node_model_.write_lock();
-        nmos::modify_resource(node_model_.node_resources, node_id_, ([&](nmos::resource &node)
+        ptp_domain_number_ = 0 <= ptp_domain && ptp_domain <= 127 ? ptp_domain : 127;
+        if (is_valid_ptp_gmid(normalized_gmid))
+        {
+               nmos::modify_resource(node_model_.node_resources, node_id_, ([&](nmos::resource &node)
                                                                      { node.data[nmos::fields::clocks] = web::json::value_of(
-                                                                           {is_valid_ptp_gmid(normalized_gmid)
-                                                                                ? nmos::make_ptp_clock(nmos::clock_names::clk0, false,
-                                                                                                       utility::s2us(normalized_gmid), locked_)
-                                                                                : nmos::make_internal_clock(nmos::clock_names::clk0)}); }));
-
+                                                                           { nmos::make_ptp_clock(nmos::clock_names::clk0, false,
+                                                                                                       utility::s2us(normalized_gmid), locked_)}); })); 
+        }
+        
+  
         for (const auto &sender_id : sender_ids_)
         {
           auto sender = nmos::find_resource(node_model_.node_resources,
@@ -3946,9 +4105,9 @@ namespace seeder
     {
       p_impl->set_runtime_interfaces(primary, secondary);
     }
-    void Node::set_ptp_clock(std::string gmtid, bool locked)
+    void Node::set_ptp_clock(std::string gmtid, bool locked, int ptp_domain)
     {
-      p_impl->set_ptp_clock(gmtid, locked);
+      p_impl->set_ptp_clock(gmtid, locked, ptp_domain);
     }
 
   } // namespace nmos_node

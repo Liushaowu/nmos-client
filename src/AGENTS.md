@@ -29,5 +29,5 @@ Scope: applies to `src/**` only. In conflicts, this file overrides root `AGENTS.
 ## LOCAL VALIDATION
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build
+cmake --workflow --preset debug
 ```
