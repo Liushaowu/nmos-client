@@ -237,6 +237,8 @@ int App::run() {
 
   node_runtime_->set_receiver_event_handler(
       [this](const ReceiverEvent &event) { handle_receiver_event(event); });
+  node_runtime_->set_sender_event_handler(
+      [this](const SenderEvent &event) { handle_sender_event(event); });
   node_runtime_->set_registration_event_handler(
       [this](const RegistrationEvent &event)
       { handle_registration_event(event); });
@@ -462,6 +464,28 @@ void App::handle_ws_disconnected() {
 
 void App::handle_ws_error(const std::string &message) {
   state_store_.mark_sync_failed(message);
+}
+
+void App::handle_sender_event(const SenderEvent &event) {
+  if (!ws_client_ || !ws_client_->is_connected()) {
+    return;
+  }
+
+  std::visit(
+      [&](const auto &payload) {
+        using Payload = std::decay_t<decltype(payload)>;
+        if constexpr (std::is_same_v<Payload, nmos_node::VideoSender>) {
+          ws_client_->send_json(
+              make_sender_video_observed_changed_message(payload));
+        } else if constexpr (std::is_same_v<Payload, nmos_node::AudioSender>) {
+          ws_client_->send_json(
+              make_sender_audio_observed_changed_message(payload));
+        } else {
+          ws_client_->send_json(
+              make_sender_ancillary_observed_changed_message(payload));
+        }
+      },
+      event.payload);
 }
 
 void App::handle_receiver_event(const ReceiverEvent &event) {

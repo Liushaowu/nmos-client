@@ -54,6 +54,15 @@ namespace
     }
   }
 
+  const value &require_object_value(const value &object, const std::string &path)
+  {
+    if (!object.is_object())
+    {
+      throw invalid_field_error(path, "object", "not an object");
+    }
+    return object;
+  }
+
   value require_array_field(const value &object, const char *name,
                             const std::string &path_base = {})
   {
@@ -379,7 +388,13 @@ namespace
   seeder::nmos_node::Redudancy redudancy_from_json(
       const value &object, const std::string &path)
   {
+    if (!object.is_object())
+    {
+      throw invalid_field_error(path, "object", "not an object");
+    }
+
     seeder::nmos_node::Redudancy redudancy;
+    redudancy.present = true;
     redudancy.enable = get_bool_or(object, "enable", false, path);
     redudancy.source_ip = get_string_or(object, "source_ip", {}, path);
     redudancy.ip = get_string_or(object, "ip", {}, path);
@@ -435,7 +450,10 @@ namespace
     object[to_t("source_ip")] = json_string(sender.source_ip);
     object[to_t("ip")] = json_string(sender.ip);
     object[to_t("port")] = value::number(sender.port);
-    object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+    if (sender.redudancy.present)
+    {
+      object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+    }
     object[to_t("pg_format")] = value::number(sender.pg_format);
     return object;
   }
@@ -474,7 +492,10 @@ namespace
     object[to_t("source_ip")] = json_string(sender.source_ip);
     object[to_t("ip")] = json_string(sender.ip);
     object[to_t("port")] = value::number(sender.port);
-    object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+    if (sender.redudancy.present)
+    {
+      object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+    }
     return object;
   }
 
@@ -510,7 +531,10 @@ namespace
     object[to_t("source_ip")] = json_string(sender.source_ip);
     object[to_t("ip")] = json_string(sender.ip);
     object[to_t("port")] = value::number(sender.port);
-    object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+    if (sender.redudancy.present)
+    {
+      object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+    }
     return object;
   }
 
@@ -560,7 +584,10 @@ namespace
     object[to_t("source_ip")] = json_string(receiver.source_ip);
     object[to_t("ip")] = json_string(receiver.ip);
     object[to_t("port")] = value::number(receiver.port);
-    object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
+    if (receiver.redudancy.present)
+    {
+      object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
+    }
     if (!receiver.caps.formats.empty() || !receiver.caps.colorspaces.empty() ||
         !receiver.caps.transfer_characteristics.empty())
     {
@@ -576,17 +603,6 @@ namespace
     object[to_t("colorspace")] = json_string(receiver.colorspace);
     object[to_t("transfer_characteristics")] =
         json_string(receiver.transfer_characteristics);
-    // object[to_t("interlace")] = value::boolean(receiver.interlace);
-    // object[to_t("fps")] = value::number(receiver.fps);
-    // object[to_t("fps_numerator")] = value::number(receiver.fps_numerator);
-    // object[to_t("fps_denominator")] = value::number(receiver.fps_denominator);
-    // object[to_t("width")] = value::number(receiver.width);
-    // object[to_t("height")] = value::number(receiver.height);
-    // object[to_t("source_ip")] = json_string(receiver.source_ip);
-    // object[to_t("ip")] = json_string(receiver.ip);
-    // object[to_t("port")] = value::number(receiver.port);
-    // object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
-    // object[to_t("pg_format")] = value::number(receiver.pg_format);
     return object;
   }
 
@@ -625,7 +641,10 @@ namespace
     object[to_t("source_ip")] = json_string(receiver.source_ip);
     object[to_t("ip")] = json_string(receiver.ip);
     object[to_t("port")] = value::number(receiver.port);
-    object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
+    if (receiver.redudancy.present)
+    {
+      object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
+    }
     return object;
   }
 
@@ -656,6 +675,13 @@ namespace
     object[to_t("name")] = json_string(receiver.name);
     object[to_t("format")] = json_string(receiver.format);
     object[to_t("enable")] = value::boolean(receiver.enable);
+    object[to_t("source_ip")] = json_string(receiver.source_ip);
+    object[to_t("ip")] = json_string(receiver.ip);
+    object[to_t("port")] = value::number(receiver.port);
+    if (receiver.redudancy.present)
+    {
+      object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
+    }
     return object;
   }
 
@@ -666,6 +692,16 @@ namespace
     value object = value::object();
     object[to_t("type")] = json_string(type_name);
     object[to_t("payload")] = serializer(receiver);
+    return object;
+  }
+
+  template <typename Sender>
+  value make_sender_message(const std::string &type_name, const Sender &sender,
+                            value (*serializer)(const Sender &))
+  {
+    value object = value::object();
+    object[to_t("type")] = json_string(type_name);
+    object[to_t("payload")] = serializer(sender);
     return object;
   }
 
@@ -727,6 +763,7 @@ namespace seeder::nmos_sync
 
   SnapshotDto snapshot_from_json(const value &root)
   {
+    require_object_value(root, "snapshot");
     const auto senders = require_array_field(root, "senders");
     const auto receivers = require_array_field(root, "receivers");
 
@@ -752,45 +789,61 @@ namespace seeder::nmos_sync
     }
 
     std::size_t sender_index = 0;
-    for (auto sender : senders.as_array())
+    for (const auto &sender : senders.as_array())
     {
       const auto sender_path = index_path("senders", sender_index);
-      if (sender.has_field(to_t("video")))
+      const auto &sender_object = require_object_value(sender, sender_path);
+      if (sender_object.has_field(to_t("video")))
       {
+        const auto video_path = field_path(sender_path, "video");
         snapshot.video_senders.push_back(video_sender_from_json(
-            sender["video"], field_path(sender_path, "video")));
+            require_object_value(sender_object.at(to_t("video")), video_path),
+            video_path));
       }
-      if (sender.has_field(to_t("audio")))
+      if (sender_object.has_field(to_t("audio")))
       {
+        const auto audio_path = field_path(sender_path, "audio");
         snapshot.audio_senders.push_back(audio_sender_from_json(
-            sender["audio"], field_path(sender_path, "audio")));
+            require_object_value(sender_object.at(to_t("audio")), audio_path),
+            audio_path));
       }
-      if (sender.has_field(to_t("ancillary")))
+      if (sender_object.has_field(to_t("ancillary")))
       {
+        const auto ancillary_path = field_path(sender_path, "ancillary");
         snapshot.ancillary_senders.push_back(ancillary_sender_from_json(
-            sender["ancillary"], field_path(sender_path, "ancillary")));
+            require_object_value(sender_object.at(to_t("ancillary")),
+                                 ancillary_path),
+            ancillary_path));
       }
       ++sender_index;
     }
 
     std::size_t receiver_index = 0;
-    for (auto receiver : receivers.as_array())
+    for (const auto &receiver : receivers.as_array())
     {
       const auto receiver_path = index_path("receivers", receiver_index);
-      if (receiver.has_field(to_t("video")))
+      const auto &receiver_object = require_object_value(receiver, receiver_path);
+      if (receiver_object.has_field(to_t("video")))
       {
+        const auto video_path = field_path(receiver_path, "video");
         snapshot.video_receivers.push_back(video_receiver_from_json(
-            receiver["video"], field_path(receiver_path, "video")));
+            require_object_value(receiver_object.at(to_t("video")), video_path),
+            video_path));
       }
-      if (receiver.has_field(to_t("audio")))
+      if (receiver_object.has_field(to_t("audio")))
       {
+        const auto audio_path = field_path(receiver_path, "audio");
         snapshot.audio_receivers.push_back(audio_receiver_from_json(
-            receiver["audio"], field_path(receiver_path, "audio")));
+            require_object_value(receiver_object.at(to_t("audio")), audio_path),
+            audio_path));
       }
-      if (receiver.has_field(to_t("ancillary")))
+      if (receiver_object.has_field(to_t("ancillary")))
       {
+        const auto ancillary_path = field_path(receiver_path, "ancillary");
         snapshot.ancillary_receivers.push_back(ancillary_receiver_from_json(
-            receiver["ancillary"], field_path(receiver_path, "ancillary")));
+            require_object_value(receiver_object.at(to_t("ancillary")),
+                                 ancillary_path),
+            ancillary_path));
       }
       ++receiver_index;
     }
@@ -873,6 +926,27 @@ namespace seeder::nmos_sync
     return root;
   }
 
+  web::json::value make_sender_video_observed_changed_message(
+      const nmos_node::VideoSender &sender)
+  {
+    return make_sender_message("sender.video.observed_changed", sender,
+                               video_sender_to_json);
+  }
+
+  web::json::value make_sender_audio_observed_changed_message(
+      const nmos_node::AudioSender &sender)
+  {
+    return make_sender_message("sender.audio.observed_changed", sender,
+                               audio_sender_to_json);
+  }
+
+  web::json::value make_sender_ancillary_observed_changed_message(
+      const nmos_node::AncillarySender &sender)
+  {
+    return make_sender_message("sender.ancillary.observed_changed", sender,
+                               ancillary_sender_to_json);
+  }
+
   web::json::value make_receiver_video_observed_changed_message(
       const nmos_node::VideoReceiver &receiver)
   {
@@ -897,8 +971,9 @@ namespace seeder::nmos_sync
   bool equivalent(const nmos_node::Redudancy &lhs,
                   const nmos_node::Redudancy &rhs)
   {
-    return lhs.enable == rhs.enable && lhs.source_ip == rhs.source_ip &&
-           lhs.ip == rhs.ip && lhs.port == rhs.port;
+    return lhs.present == rhs.present && lhs.enable == rhs.enable &&
+           lhs.source_ip == rhs.source_ip && lhs.ip == rhs.ip &&
+           lhs.port == rhs.port;
   }
 
   bool equivalent(const nmos_node::VideoSender &lhs,

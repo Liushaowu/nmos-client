@@ -21,6 +21,15 @@ web::hosts::experimental::host_interface device_to_interface(
 
 NodeRuntime::NodeRuntime(const std::string &node_config_path)
     : node_(node_config_path) {
+  node_.set_update_video_sender_callback(
+      [&](const nmos_node::VideoSender &sender)
+      { publish_event(SenderEvent{sender}); });
+  node_.set_update_audio_sender_callback(
+      [&](const nmos_node::AudioSender &sender)
+      { publish_event(SenderEvent{sender}); });
+  node_.set_update_ancillary_sender_callback(
+      [&](const nmos_node::AncillarySender &sender)
+      { publish_event(SenderEvent{sender}); });
   node_.set_update_video_receiver_callback(
       [&](const nmos_node::VideoReceiver &receiver)
       { publish_event(ReceiverEvent{receiver}); });
@@ -45,6 +54,12 @@ void NodeRuntime::set_receiver_event_handler(
   receiver_event_handler_ = std::move(handler);
 }
 
+void NodeRuntime::set_sender_event_handler(
+    std::function<void(const SenderEvent &event)> handler) {
+  std::lock_guard<std::mutex> lock(callback_mutex_);
+  sender_event_handler_ = std::move(handler);
+}
+
 void NodeRuntime::set_registration_event_handler(
     std::function<void(const RegistrationEvent &event)> handler) {
   std::lock_guard<std::mutex> lock(callback_mutex_);
@@ -59,14 +74,12 @@ void NodeRuntime::set_ptp_clock(const PtpClockDto &ptp_clock) {
 
 void NodeRuntime::set_runtime_devices(
     const std::vector<SnapshotDto::DeviceDto> &devices) {
-  if (devices.empty()) {
-    return;
+  std::vector<web::hosts::experimental::host_interface> interfaces;
+  interfaces.reserve(devices.size());
+  for (const auto &device : devices) {
+    interfaces.push_back(device_to_interface(device));
   }
-
-  const auto primary = device_to_interface(devices.front());
-  const auto secondary =
-      1 < devices.size() ? device_to_interface(devices[1]) : primary;
-  node_.set_runtime_interfaces(primary, secondary);
+  node_.set_runtime_interfaces(std::move(interfaces));
 }
 
 web::json::value NodeRuntime::effective_settings() const {
@@ -170,6 +183,17 @@ void NodeRuntime::publish_event(const ReceiverEvent &event) {
   {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     handler = receiver_event_handler_;
+  }
+  if (handler) {
+    handler(event);
+  }
+}
+
+void NodeRuntime::publish_event(const SenderEvent &event) {
+  std::function<void(const SenderEvent &event)> handler;
+  {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    handler = sender_event_handler_;
   }
   if (handler) {
     handler(event);

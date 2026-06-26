@@ -1,7 +1,7 @@
 {
   "node_config_path": "/home/seeder/lsw/workspace/nmos-client-opencode/node_config_dev.json",
-  "snapshot_url": "http://192.168.123.195/api/data/nmos",
-  "ws_url": "ws://192.168.123.195/ws/nmos",
+  "snapshot_url": "http://127.0.0.1/api/data/nmos",
+  "ws_url": "ws://127.0.0.1/ws/nmos",
   "pull_timeout_ms": 3000,
   "reconnect_interval_ms": 1000,
   "ws_heartbeat_interval_ms": 5000,

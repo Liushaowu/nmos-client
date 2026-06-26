@@ -60,8 +60,10 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#ifdef HAVE_LLDP
 #include "nmos/lldp_manager.h"
 #include "lldp/lldp_manager.h"
+#endif
 #include <nmos/id.h>
 #include <nmos/mutex.h>
 #include <algorithm>
@@ -80,6 +82,44 @@ namespace
   {
     in_addr address{};
     return 1 == inet_pton(AF_INET, value.c_str(), &address);
+  }
+
+  bool is_valid_ip_literal(const std::string &value)
+  {
+    in_addr ipv4{};
+    if (1 == inet_pton(AF_INET, value.c_str(), &ipv4))
+    {
+      return true;
+    }
+
+    in6_addr ipv6{};
+    return 1 == inet_pton(AF_INET6, value.c_str(), &ipv6);
+  }
+
+  web::json::value transport_param_with_valid_destination_ip(
+      const web::json::value &transport_param)
+  {
+    auto sanitized = transport_param;
+    if (!sanitized.is_object())
+    {
+      return sanitized;
+    }
+
+    if (!sanitized.has_field(nmos::fields::destination_ip))
+    {
+      sanitized[nmos::fields::destination_ip] =
+          web::json::value::string(U("0.0.0.0"));
+      return sanitized;
+    }
+
+    const auto &destination_ip = sanitized.at(nmos::fields::destination_ip);
+    if (!destination_ip.is_string() ||
+        !is_valid_ip_literal(to_utf8_string(destination_ip.as_string())))
+    {
+      sanitized[nmos::fields::destination_ip] =
+          web::json::value::string(U("0.0.0.0"));
+    }
+    return sanitized;
   }
 
   std::string resolve_interface_ipv4_address(const std::string &interface_name)
@@ -474,12 +514,127 @@ namespace
                : utility::conversions::to_utf8string(interface.addresses.front());
   }
 
-  std::string receiver_interface_ip_or_default(
-      const std::string &configured_ip,
-      const web::hosts::experimental::host_interface &interface)
+  struct RuntimeInterfaceLeg
   {
-    return configured_ip.empty() ? first_interface_address(interface)
-                                 : configured_ip;
+    web::hosts::experimental::host_interface interface;
+    std::string ip;
+    bool selected = false;
+  };
+
+  struct RuntimeInterfaceSelection
+  {
+    RuntimeInterfaceLeg primary;
+    RuntimeInterfaceLeg redundancy;
+  };
+
+  bool interface_has_address(
+      const web::hosts::experimental::host_interface &interface,
+      const std::string &address)
+  {
+    return !address.empty() &&
+           std::any_of(interface.addresses.begin(), interface.addresses.end(),
+                       [&](const utility::string_t &interface_address)
+                       {
+                         return utility::conversions::to_utf8string(
+                                    interface_address) == address;
+                       });
+  }
+
+  RuntimeInterfaceLeg make_runtime_interface_leg(
+      const web::hosts::experimental::host_interface &interface,
+      const std::string &ip)
+  {
+    return RuntimeInterfaceLeg{interface, ip, true};
+  }
+
+  RuntimeInterfaceLeg select_runtime_interface_leg(
+      const std::vector<web::hosts::experimental::host_interface> &interfaces,
+      const std::string &configured_ip)
+  {
+    for (const auto &interface : interfaces)
+    {
+      if (interface_has_address(interface, configured_ip))
+      {
+        return make_runtime_interface_leg(interface, configured_ip);
+      }
+    }
+    for (const auto &interface : interfaces)
+    {
+      if (!interface.addresses.empty())
+      {
+        return make_runtime_interface_leg(interface, first_interface_address(interface));
+      }
+    }
+    if (!interfaces.empty())
+    {
+      return make_runtime_interface_leg(interfaces.front(), std::string{});
+    }
+    return RuntimeInterfaceLeg{};
+  }
+
+  RuntimeInterfaceLeg select_redundancy_runtime_interface_leg(
+      const std::vector<web::hosts::experimental::host_interface> &interfaces,
+      const std::string &configured_ip, const RuntimeInterfaceLeg &primary)
+  {
+    for (const auto &interface : interfaces)
+    {
+      if (interface_has_address(interface, configured_ip))
+      {
+        return make_runtime_interface_leg(interface, configured_ip);
+      }
+    }
+    for (const auto &interface : interfaces)
+    {
+      if (!interface.addresses.empty() &&
+          (!primary.selected || interface.name != primary.interface.name))
+      {
+        return make_runtime_interface_leg(interface, first_interface_address(interface));
+      }
+    }
+    if (primary.selected)
+    {
+      return primary;
+    }
+    return select_runtime_interface_leg(interfaces, std::string{});
+  }
+
+  RuntimeInterfaceSelection select_runtime_interfaces(
+      const std::vector<web::hosts::experimental::host_interface> &interfaces,
+      const std::string &primary_source_ip,
+      const std::string &redundancy_source_ip,
+      const bool redundancy_enabled)
+  {
+    RuntimeInterfaceSelection selection;
+    selection.primary = select_runtime_interface_leg(interfaces, primary_source_ip);
+    if (redundancy_enabled)
+    {
+      selection.redundancy = select_redundancy_runtime_interface_leg(
+          interfaces, redundancy_source_ip, selection.primary);
+    }
+    return selection;
+  }
+
+  std::vector<utility::string_t> selected_interface_names(
+      const RuntimeInterfaceSelection &selection, const bool redundancy_enabled)
+  {
+    std::vector<utility::string_t> names;
+    if (selection.primary.selected)
+    {
+      names.push_back(selection.primary.interface.name);
+    }
+    if (redundancy_enabled && selection.redundancy.selected)
+    {
+      names.push_back(selection.redundancy.interface.name);
+    }
+    return names;
+  }
+
+  web::json::value interface_address_constraint(
+      const RuntimeInterfaceLeg &leg)
+  {
+    return value_of({{nmos::fields::constraint_enum,
+                      leg.selected ? value_from_elements(leg.interface.addresses)
+                                   : web::json::value::array()}});
   }
 
   std::string receiver_multicast_ip_or_default(const std::string &configured_ip,
@@ -614,6 +769,54 @@ namespace
     set_receiver_transport_params_leg(active, 1, secondary_multicast_ip,
                                       secondary_interface_ip,
                                       secondary_destination_port);
+  }
+
+  void set_sender_endpoint_enable(web::json::value &endpoint,
+                                  const bool primary_enabled,
+                                  const bool secondary_enabled)
+  {
+    endpoint[nmos::fields::master_enable] = value::boolean(primary_enabled);
+    auto &transport_params = endpoint[nmos::fields::transport_params];
+    if (!transport_params.is_array())
+    {
+      return;
+    }
+
+    auto &transport_params_array = transport_params.as_array();
+    if (transport_params_array.size() > 0)
+    {
+      transport_params_array[0][nmos::fields::rtp_enabled] =
+          value::boolean(primary_enabled);
+    }
+    if (transport_params_array.size() > 1)
+    {
+      transport_params_array[1][nmos::fields::rtp_enabled] =
+          value::boolean(secondary_enabled);
+    }
+  }
+
+  void initialize_sender_endpoint_enable(web::json::value &staged,
+                                         web::json::value &active,
+                                         const bool stream_enabled,
+                                         const bool redundancy_enabled)
+  {
+    const bool secondary_enabled = stream_enabled && redundancy_enabled;
+    set_sender_endpoint_enable(staged, stream_enabled, secondary_enabled);
+    set_sender_endpoint_enable(active, stream_enabled, secondary_enabled);
+  }
+
+  bool transport_param_rtp_enabled(const web::json::value &transport_param,
+                                   const bool fallback)
+  {
+    if (!transport_param.is_object() ||
+        !transport_param.has_field(nmos::fields::rtp_enabled))
+    {
+      return fallback;
+    }
+
+    const auto &rtp_enabled =
+        transport_param.at(nmos::fields::rtp_enabled);
+    return rtp_enabled.is_boolean() ? rtp_enabled.as_bool() : fallback;
   }
 }
 
@@ -750,8 +953,7 @@ namespace seeder
       std::vector<nmos::id> device_ids_;
       std::vector<nmos::id> source_ids_;
       std::vector<nmos::id> flow_ids_;
-      web::hosts::experimental::host_interface primary_interface;
-      web::hosts::experimental::host_interface secondary_interface;
+      std::vector<web::hosts::experimental::host_interface> runtime_interfaces_;
 
       std::vector<VideoSender> video_senders;
       std::vector<AudioSender> audio_senders;
@@ -765,6 +967,8 @@ namespace seeder
       nmos::node_model node_model_;
 
       std::mutex receiver_mutex_;
+      std::mutex sender_mutex_;
+      std::mutex runtime_interfaces_mutex_;
       std::mutex callback_mutex_;
       std::mutex lifecycle_mutex_;
       std::mutex thread_mutex_;
@@ -774,6 +978,10 @@ namespace seeder
       bool needs_model_reset_{false};
       int ptp_domain_number_ = 127;
 
+      std::function<void(const VideoSender &video)> update_video_sender_func;
+      std::function<void(const AudioSender &audio)> update_audio_sender_func;
+      std::function<void(const AncillarySender &ancillary)>
+          update_ancillary_sender_func;
       std::function<void(const VideoReceiver &video)> update_video_receiver_func;
       std::function<void(const AudioReceiver &audio)> update_audio_receiver_func;
       std::function<void(const AncillaryReceiver &ancillary)>
@@ -783,6 +991,13 @@ namespace seeder
 
       Impl() {}
       ~Impl() { stop(); }
+
+      std::vector<web::hosts::experimental::host_interface>
+      runtime_interfaces_snapshot()
+      {
+        std::lock_guard<std::mutex> lock(runtime_interfaces_mutex_);
+        return runtime_interfaces_;
+      }
 
       bool stop()
       {
@@ -960,10 +1175,14 @@ namespace seeder
           }
           bool master_enable = nmos::fields::master_enable(
               endpoint_active);
+          const bool stream_enable = master_enable &&
+                                     transport_param_rtp_enabled(
+                                         transport_params.at(0), false);
           std::string connection_resource_json =
               connection_resource.data.serialize();
           std::error_code ec{};
           std::string json;
+          const bool has_secondary_transport_param = transport_params.size() > 1;
           if (resource.type == nmos::types::receiver)
           {
             const auto &transport_file = nmos::fields::transport_file(endpoint_active);
@@ -980,7 +1199,8 @@ namespace seeder
             std::string interface_ip_07 = "";
             std::string multicast_ip_07 = "";
             std::string source_ip_07 = "";
-            if (transport_params.size() > 1)
+            bool redundancy_enable = false;
+            if (has_secondary_transport_param)
             {
               dest_port_07 = nmos::fields::destination_port(transport_params.at(1))
                                  .as_integer();
@@ -991,6 +1211,8 @@ namespace seeder
                   nmos::fields::multicast_ip(transport_params.at(1)).as_string();
               source_ip_07 =
                   nmos::fields::source_ip(transport_params.at(1)).as_string();
+              redundancy_enable = transport_param_rtp_enabled(
+                  transport_params.at(1), false);
             }
             std::optional<VideoReceiver> video_snapshot;
             std::optional<AudioReceiver> audio_snapshot;
@@ -1006,34 +1228,49 @@ namespace seeder
                   find_ancillary_receiver_by_resource_id(resource.id);
               if (video)
               {
-                video->enable = master_enable;
+                video->enable = stream_enable;
+                video->source_ip = interface_ip;
                 video->ip = multicast_ip;
                 video->port = dest_port;
-                video->redudancy.source_ip = source_ip_07;
-                video->redudancy.ip = multicast_ip_07;
-                video->redudancy.port = dest_port_07;
+                if (video->redudancy.present && has_secondary_transport_param)
+                {
+                  video->redudancy.enable = redundancy_enable;
+                  video->redudancy.source_ip = interface_ip_07;
+                  video->redudancy.ip = multicast_ip_07;
+                  video->redudancy.port = dest_port_07;
+                }
                 update_video_receiver_from_transport_file(*video, transport_file, *gate_);
                 video_snapshot = *video;
               }
               if (audio)
               {
-                audio->enable = master_enable;
+                audio->enable = stream_enable;
+                audio->source_ip = interface_ip;
                 audio->ip = multicast_ip;
                 audio->port = dest_port;
-                audio->redudancy.source_ip = source_ip_07;
-                audio->redudancy.ip = multicast_ip_07;
-                audio->redudancy.port = dest_port_07;
+                if (audio->redudancy.present && has_secondary_transport_param)
+                {
+                  audio->redudancy.enable = redundancy_enable;
+                  audio->redudancy.source_ip = interface_ip_07;
+                  audio->redudancy.ip = multicast_ip_07;
+                  audio->redudancy.port = dest_port_07;
+                }
                 update_audio_receiver_from_transport_file(*audio, transport_file, *gate_);
                 audio_snapshot = *audio;
               }
               if (ancillary)
               {
-                ancillary->enable = master_enable;
+                ancillary->enable = stream_enable;
+                ancillary->source_ip = interface_ip;
                 ancillary->ip = multicast_ip;
                 ancillary->port = dest_port;
-                ancillary->redudancy.source_ip = source_ip_07;
-                ancillary->redudancy.ip = multicast_ip_07;
-                ancillary->redudancy.port = dest_port_07;
+                if (ancillary->redudancy.present && has_secondary_transport_param)
+                {
+                  ancillary->redudancy.enable = redundancy_enable;
+                  ancillary->redudancy.source_ip = interface_ip_07;
+                  ancillary->redudancy.ip = multicast_ip_07;
+                  ancillary->redudancy.port = dest_port_07;
+                }
                 ancillary_snapshot = *ancillary;
               }
             }
@@ -1093,6 +1330,172 @@ namespace seeder
                     << nmos::stash_category(impl::categories::node_implementation)
                     << "update ancillary receiver callback failed not found "
                        "update_ancillary_receiver_func function";
+              }
+            }
+          }
+          else if (resource.type == nmos::types::sender)
+          {
+            int dest_port = 0;
+            std::string destination_ip;
+            std::string source_ip;
+
+            int dest_port_07 = 5004;
+            std::string destination_ip_07 = "";
+            std::string source_ip_07 = "";
+            bool redundancy_enable = false;
+            try
+            {
+              dest_port =
+                  nmos::fields::destination_port(transport_params.at(0)).as_integer();
+              destination_ip =
+                  nmos::fields::destination_ip(transport_params.at(0)).as_string();
+              source_ip =
+                  nmos::fields::source_ip(transport_params.at(0)).as_string();
+              if (dest_port < 0 || 65535 < dest_port)
+              {
+                throw std::runtime_error("destination_port out of range");
+              }
+
+              if (has_secondary_transport_param)
+              {
+                dest_port_07 = nmos::fields::destination_port(transport_params.at(1))
+                                   .as_integer();
+                destination_ip_07 =
+                    nmos::fields::destination_ip(transport_params.at(1)).as_string();
+                source_ip_07 =
+                    nmos::fields::source_ip(transport_params.at(1)).as_string();
+                redundancy_enable = transport_param_rtp_enabled(
+                    transport_params.at(1), false);
+                if (dest_port_07 < 0 || 65535 < dest_port_07)
+                {
+                  throw std::runtime_error("secondary destination_port out of range");
+                }
+              }
+            }
+            catch (const std::exception &error)
+            {
+              slog::log<slog::severities::error>(*gate_, SLOG_FLF)
+                  << nmos::stash_category(impl::categories::node_implementation)
+                  << "connection activation ignored: invalid sender transport_params for "
+                  << id_type << ": " << error.what();
+              return;
+            }
+
+            std::optional<VideoSender> video_snapshot;
+            std::optional<AudioSender> audio_snapshot;
+            std::optional<AncillarySender> ancillary_snapshot;
+            std::function<void(const VideoSender &)> video_callback;
+            std::function<void(const AudioSender &)> audio_callback;
+            std::function<void(const AncillarySender &)> ancillary_callback;
+
+            {
+              std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+              VideoSender *video = find_video_sender_by_sender_id(resource.id);
+              AudioSender *audio = find_audio_sender_by_sender_id(resource.id);
+              AncillarySender *ancillary =
+                  find_ancillary_sender_by_sender_id(resource.id);
+              if (video)
+              {
+                video->enable = stream_enable;
+                video->source_ip = source_ip;
+                video->ip = destination_ip;
+                video->port = dest_port;
+                if (video->redudancy.present && has_secondary_transport_param)
+                {
+                  video->redudancy.enable = redundancy_enable;
+                  video->redudancy.source_ip = source_ip_07;
+                  video->redudancy.ip = destination_ip_07;
+                  video->redudancy.port = dest_port_07;
+                }
+                video_snapshot = *video;
+              }
+              if (audio)
+              {
+                audio->enable = stream_enable;
+                audio->source_ip = source_ip;
+                audio->ip = destination_ip;
+                audio->port = dest_port;
+                if (audio->redudancy.present && has_secondary_transport_param)
+                {
+                  audio->redudancy.enable = redundancy_enable;
+                  audio->redudancy.source_ip = source_ip_07;
+                  audio->redudancy.ip = destination_ip_07;
+                  audio->redudancy.port = dest_port_07;
+                }
+                audio_snapshot = *audio;
+              }
+              if (ancillary)
+              {
+                ancillary->enable = stream_enable;
+                ancillary->source_ip = source_ip;
+                ancillary->ip = destination_ip;
+                ancillary->port = dest_port;
+                if (ancillary->redudancy.present && has_secondary_transport_param)
+                {
+                  ancillary->redudancy.enable = redundancy_enable;
+                  ancillary->redudancy.source_ip = source_ip_07;
+                  ancillary->redudancy.ip = destination_ip_07;
+                  ancillary->redudancy.port = dest_port_07;
+                }
+                ancillary_snapshot = *ancillary;
+              }
+            }
+
+            {
+              std::lock_guard<std::mutex> callback_lock(callback_mutex_);
+              video_callback = update_video_sender_func;
+              audio_callback = update_audio_sender_func;
+              ancillary_callback = update_ancillary_sender_func;
+            }
+
+            if (video_snapshot)
+            {
+              if (video_callback)
+              {
+                video_callback(*video_snapshot);
+              }
+              else
+              {
+                slog::log<slog::severities::error>(*gate_, SLOG_FLF)
+                    << nmos::stash_category(impl::categories::node_implementation)
+                    << "update video sender callback failed not found "
+                       "update_video_sender_func function";
+              }
+            }
+            if (audio_snapshot)
+            {
+              if (audio_callback)
+              {
+                audio_callback(*audio_snapshot);
+                slog::log<slog::severities::info>(*gate_, SLOG_FLF)
+                    << nmos::stash_category(impl::categories::node_implementation)
+                    << "update audio sender callback success " << audio_snapshot->ip
+                    << ":" << audio_snapshot->port;
+              }
+              else
+              {
+                slog::log<slog::severities::info>(*gate_, SLOG_FLF)
+                    << nmos::stash_category(impl::categories::node_implementation)
+                    << "update audio sender callback failed not found "
+                       "update_audio_sender_func function";
+              }
+            }
+            if (ancillary_snapshot)
+            {
+              if (ancillary_callback)
+              {
+                ancillary_callback(*ancillary_snapshot);
+                slog::log<slog::severities::info>(*gate_, SLOG_FLF)
+                    << nmos::stash_category(impl::categories::node_implementation)
+                    << "update ancillary sender callback success "
+                    << ancillary_snapshot->ip << ":" << ancillary_snapshot->port;
+              }
+              else
+              {
+                slog::log<slog::severities::info>(*gate_, SLOG_FLF)
+                    << nmos::stash_category(impl::categories::node_implementation)
+                    << "update ancillary sender callback failed not found "
+                       "update_ancillary_sender_func function";
               }
             }
           }
@@ -1189,49 +1592,55 @@ namespace seeder
           std::string redudancy_ip;
           if (id_type.second == nmos::types::sender)
           {
-            VideoSender *video =
-                find_video_sender_by_sender_id(connection_resource.id);
-            if (video)
             {
-              smpte2022_7 = video->redudancy.enable;
-              source_ip = video->source_ip;
-              redudancy_source_ip = video->redudancy.source_ip;
-              ip = video->ip;
-              redudancy_ip = video->redudancy.ip;
-              port = video->port;
+              std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+              VideoSender *video =
+                  find_video_sender_by_sender_id(connection_resource.id);
+              if (video)
+              {
+                smpte2022_7 = video->redudancy.present;
+                source_ip = video->source_ip;
+                redudancy_source_ip = video->redudancy.source_ip;
+                ip = video->ip;
+                redudancy_ip = video->redudancy.ip;
+                port = video->port;
+              }
+              AudioSender *audio =
+                  find_audio_sender_by_sender_id(connection_resource.id);
+              if (audio)
+              {
+                smpte2022_7 = audio->redudancy.present;
+                source_ip = audio->source_ip;
+                redudancy_source_ip = audio->redudancy.source_ip;
+                ip = audio->ip;
+                redudancy_ip = audio->redudancy.ip;
+                port = audio->port;
+              }
+              AncillarySender *ancillary =
+                  find_ancillary_sender_by_sender_id(connection_resource.id);
+              if (ancillary)
+              {
+                smpte2022_7 = ancillary->redudancy.present;
+                source_ip = ancillary->source_ip;
+                redudancy_source_ip = ancillary->redudancy.source_ip;
+                ip = ancillary->ip;
+                redudancy_ip = ancillary->redudancy.ip;
+                port = ancillary->port;
+              }
             }
-            AudioSender *audio =
-                find_audio_sender_by_sender_id(connection_resource.id);
-            if (audio)
-            {
-              smpte2022_7 = audio->redudancy.enable;
-              source_ip = audio->source_ip;
-              redudancy_source_ip = audio->redudancy.source_ip;
-              ip = audio->ip;
-              redudancy_ip = audio->redudancy.ip;
-              port = audio->port;
-            }
-            AncillarySender *ancillary =
-                find_ancillary_sender_by_sender_id(connection_resource.id);
-            if (ancillary)
-            {
-              smpte2022_7 = ancillary->redudancy.enable;
-              source_ip = ancillary->source_ip;
-              redudancy_source_ip = ancillary->redudancy.source_ip;
-              ip = ancillary->ip;
-              redudancy_ip = ancillary->redudancy.ip;
-              port = ancillary->port;
-            }
+            const auto selection = select_runtime_interfaces(
+                runtime_interfaces_snapshot(), source_ip, redudancy_source_ip,
+                smpte2022_7);
             nmos::details::resolve_auto(transport_params_array[0],
                                         nmos::fields::source_ip,
                                         [&]
-                                        { return value::string(source_ip); });
+                                        { return value::string(selection.primary.ip); });
             if (smpte2022_7 && transport_params_array.size() > 1)
             {
               nmos::details::resolve_auto(transport_params_array[1],
                                           nmos::fields::source_ip,
                                           [&]
-                                          { return value::string(redudancy_source_ip.empty() ? source_ip : redudancy_source_ip); });
+                                          { return value::string(selection.redundancy.ip); });
             }
             nmos::details::resolve_auto(transport_params_array[0],
                                         nmos::fields::destination_ip,
@@ -1255,6 +1664,8 @@ namespace seeder
             std::string secondary_multicast_ip = "";
             std::string secondary_interface_ip = "";
             int secondary_port = 0;
+            std::string primary_source_ip;
+            std::string redudancy_source_ip;
             {
               std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
               VideoReceiver *video =
@@ -1263,13 +1674,12 @@ namespace seeder
               {
                 source_ip = "";
                 port = video->port;
-                smpte2022_7 = video->redudancy.enable;
+                smpte2022_7 = video->redudancy.present;
                 ip = video->ip;
-                interface_ip = receiver_interface_ip_or_default(video->source_ip,
-                                                                primary_interface);
+                primary_source_ip = video->source_ip;
+                redudancy_source_ip = video->redudancy.source_ip;
                 secondary_multicast_ip = receiver_multicast_ip_or_default(
                     video->redudancy.ip, video->ip);
-                secondary_interface_ip = first_interface_address(secondary_interface);
                 secondary_port = receiver_port_or_default(video->redudancy.port,
                                                           video->port);
               }
@@ -1277,15 +1687,14 @@ namespace seeder
                   find_audio_receiver_by_resource_id(connection_resource.id);
               if (audio)
               {
-                smpte2022_7 = audio->redudancy.enable;
+                smpte2022_7 = audio->redudancy.present;
                 source_ip = "";
                 ip = audio->ip;
                 port = audio->port;
-                interface_ip = receiver_interface_ip_or_default(audio->source_ip,
-                                                                primary_interface);
+                primary_source_ip = audio->source_ip;
+                redudancy_source_ip = audio->redudancy.source_ip;
                 secondary_multicast_ip = receiver_multicast_ip_or_default(
                     audio->redudancy.ip, audio->ip);
-                secondary_interface_ip = first_interface_address(secondary_interface);
                 secondary_port = receiver_port_or_default(audio->redudancy.port,
                                                           audio->port);
               }
@@ -1293,19 +1702,23 @@ namespace seeder
                   find_ancillary_receiver_by_resource_id(connection_resource.id);
               if (ancillary)
               {
-                smpte2022_7 = ancillary->redudancy.enable;
+                smpte2022_7 = ancillary->redudancy.present;
                 source_ip = "";
                 ip = ancillary->ip;
                 port = ancillary->port;
-                interface_ip = receiver_interface_ip_or_default(
-                    ancillary->source_ip, primary_interface);
+                primary_source_ip = ancillary->source_ip;
+                redudancy_source_ip = ancillary->redudancy.source_ip;
                 secondary_multicast_ip = receiver_multicast_ip_or_default(
                     ancillary->redudancy.ip, ancillary->ip);
-                secondary_interface_ip = first_interface_address(secondary_interface);
                 secondary_port = receiver_port_or_default(
                     ancillary->redudancy.port, ancillary->port);
               }
             }
+            const auto selection = select_runtime_interfaces(
+                runtime_interfaces_snapshot(), primary_source_ip,
+                redudancy_source_ip, smpte2022_7);
+            interface_ip = selection.primary.ip;
+            secondary_interface_ip = selection.redundancy.ip;
             std::string json = transport_params.serialize();
             nmos::details::resolve_auto(transport_params_array[0],
                                         nmos::fields::multicast_ip,
@@ -1407,10 +1820,55 @@ namespace seeder
             // flexible and extensible approach
             std::string con = sender.data.serialize();
             std::string session_name = nmos::fields::description(sender.data);
+            const auto &transport_params = nmos::fields::transport_params(
+                nmos::fields::endpoint_active(connection_sender.data));
+            auto transportfile_transport_params = transport_params;
+            if (transport_params.is_array())
+            {
+              transportfile_transport_params = value::array();
+              size_t leg = 0;
+              for (const auto &transport_param : transport_params.as_array())
+              {
+                transportfile_transport_params[leg] =
+                    transport_param_with_valid_destination_ip(transport_param);
+                ++leg;
+              }
+            }
+            auto media_stream_ids = [&]
+            {
+              std::vector<utility::string_t> ids;
+              if (!transportfile_transport_params.is_array())
+              {
+                return ids;
+              }
+
+              const auto leg_count = transportfile_transport_params.as_array().size();
+              if (leg_count < 2)
+              {
+                return ids;
+              }
+
+              ids.reserve(leg_count);
+              for (std::size_t leg = 0; leg < leg_count; ++leg)
+              {
+                if (0 == leg)
+                {
+                  ids.push_back(U("PRIMARY"));
+                }
+                else if (1 == leg)
+                {
+                  ids.push_back(U("SECONDARY"));
+                }
+                else
+                {
+                  ids.push_back(utility::conversions::to_string_t(
+                      "LEG" + std::to_string(leg + 1)));
+                }
+              }
+              return ids;
+            }();
             auto sdp_params = [&]
             {
-              const std::vector<utility::string_t> mids{U("PRIMARY"),
-                                                        U("SECONDARY")};
               const nmos::format format{nmos::fields::format(flow->data)};
               if (nmos::formats::video == format)
               {
@@ -1432,7 +1890,7 @@ namespace seeder
                   }
                   const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, ptp_domain_number_);
                   return nmos::make_video_raw_sdp_parameters(
-                      session_name, raw_params, nmos::details::payload_type_video_default, mids, ts_refclk);
+                      session_name, raw_params, nmos::details::payload_type_video_default, media_stream_ids, ts_refclk);
                 }
                 throw std::logic_error("unexpected video media type");
               }
@@ -1442,7 +1900,7 @@ namespace seeder
 
                 auto audio_L_params = nmos::make_audio_L_parameters(node->data, source->data, flow->data, sender.data, packet_time);
                 const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, ptp_domain_number_);
-                return nmos::make_audio_L_sdp_parameters(session_name, audio_L_params, nmos::details::payload_type_audio_default, mids, ts_refclk);
+                return nmos::make_audio_L_sdp_parameters(session_name, audio_L_params, nmos::details::payload_type_audio_default, media_stream_ids, ts_refclk);
               }
               else if (nmos::formats::data == format)
               {
@@ -1450,7 +1908,7 @@ namespace seeder
                const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, ptp_domain_number_);
                 return nmos::make_video_smpte291_sdp_parameters(
                     session_name, samp291_params,
-                    nmos::details::payload_type_data_default, mids, ts_refclk);
+                    nmos::details::payload_type_data_default, media_stream_ids, ts_refclk);
               }
               else if (nmos::formats::mux == format)
               {
@@ -1458,7 +1916,7 @@ namespace seeder
                 const auto ts_refclk = nmos::details::make_ts_refclk(node->data, source->data, sender.data, ptp_domain_number_);
                 return nmos::make_video_SMPTE2022_6_sdp_parameters(
                     session_name, SMPTE2022_6_params,
-                    nmos::details::payload_type_mux_default, mids, ts_refclk);
+                    nmos::details::payload_type_mux_default, media_stream_ids, ts_refclk);
               }
               else
               {
@@ -1467,36 +1925,13 @@ namespace seeder
               throw std::logic_error("failed to make SDP parameters");
             }();
 
-            auto &transport_params = nmos::fields::transport_params(
-                nmos::fields::endpoint_active(connection_sender.data));
 
-            if (transport_params.is_array())
-            {
-              const auto leg_count = transport_params.as_array().size();
-              auto &media_stream_ids = sdp_params.group.media_stream_ids;
-              for (auto leg = media_stream_ids.size(); leg < leg_count; ++leg)
-              {
-                if (0 == leg)
-                {
-                  media_stream_ids.push_back(U("PRIMARY"));
-                }
-                else if (1 == leg)
-                {
-                  media_stream_ids.push_back(U("SECONDARY"));
-                }
-                else
-                {
-                  media_stream_ids.push_back(
-                      utility::conversions::to_string_t("LEG" + std::to_string(leg + 1)));
-                }
-              }
-            }
-
-            // std::string transport_params_json = transport_params.serialize();
-            // std::cout << "transport_params_json: "
-            //           << utility::us2s(transport_params_json) << std::endl;
-            auto session_description =
-                nmos::make_session_description(sdp_params, transport_params);
+            std::string transport_params_json =
+                transportfile_transport_params.serialize();
+            std::cout << "transport_params_json: "
+                      << utility::us2s(transport_params_json) << std::endl;
+            auto session_description = nmos::make_session_description(
+                sdp_params, transportfile_transport_params);
             auto sdp =
                 utility::s2us(sdp::make_session_description(session_description));
             endpoint_transportfile =
@@ -1911,6 +2346,14 @@ namespace seeder
         // host_addresses
         const auto host_interfaces =
             nmos::get_host_interfaces(node_model_.settings);
+        {
+          std::lock_guard<std::mutex> runtime_interfaces_lock(
+              runtime_interfaces_mutex_);
+          if (runtime_interfaces_.empty())
+          {
+            runtime_interfaces_ = host_interfaces;
+          }
+        }
         const auto interfaces =
             nmos::experimental::node_interfaces(host_interfaces);
 
@@ -1929,10 +2372,12 @@ namespace seeder
                                      std::move(node), *gate_, lock))
             throw node_implementation_init_exception("insert node failed!");
         }
+        #ifdef HAVE_LLDP
           slog::log<slog::severities::info>(*gate_, SLOG_FLF) << "Attempting to configure LLDP";
           auto lldp_manager = nmos::experimental::make_lldp_manager(node_model_, interfaces, true, *gate_);
           // hm, open may potentially throw?
           lldp::lldp_manager_guard lldp_manager_guard(lldp_manager);
+       #endif
         {
           std::vector<nmos::id> empty;
           auto device = nmos::make_device(device_id, node_id, empty, empty,
@@ -1952,6 +2397,7 @@ namespace seeder
         ptp_domain_number_ = 0 <= ptp_domain && ptp_domain <= 127 ? ptp_domain : 127;
         if (is_valid_ptp_gmid(normalized_gmid))
         {
+          slog::log<slog::severities::info>(*gate_, SLOG_FLF) << "Setting PTP clock GMID to " << normalized_gmid << " and locked to " << locked_ << " with domain number " << ptp_domain_number_;
                nmos::modify_resource(node_model_.node_resources, node_id_, ([&](nmos::resource &node)
                                                                      { node.data[nmos::fields::clocks] = web::json::value_of(
                                                                            { nmos::make_ptp_clock(nmos::clock_names::clk0, false,
@@ -1975,7 +2421,9 @@ namespace seeder
                                       connection_sender.data[nmos::fields::endpoint_transportfile];
                                   set_transportfile(*sender, connection_sender,
                                                     endpoint_transportfile);
-                                });
+                        std::string transportfile_json = endpoint_transportfile.serialize();
+                        slog::log<slog::severities::info>(*gate_, SLOG_FLF) << "Updated transportfile for sender " << sender_id << ": " << transportfile_json;
+                                                  });
         }
       }
 
@@ -2000,16 +2448,35 @@ namespace seeder
 
       void reinsert_cached_resources()
       {
-        if (video_senders.empty() && audio_senders.empty() &&
-            ancillary_senders.empty() && video_receivers.empty() &&
-            audio_receivers.empty() && ancillary_receivers.empty())
+        bool has_senders = false;
+        bool has_receivers = false;
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          has_senders = !video_senders.empty() || !audio_senders.empty() ||
+                        !ancillary_senders.empty();
+        }
+        {
+          std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+          has_receivers = !video_receivers.empty() || !audio_receivers.empty() ||
+                          !ancillary_receivers.empty();
+        }
+        if (!has_senders && !has_receivers)
         {
           return;
         }
 
-        const auto cached_video_senders = video_senders;
-        const auto cached_audio_senders = audio_senders;
-        const auto cached_ancillary_senders = ancillary_senders;
+        std::vector<VideoSender> cached_video_senders;
+        std::vector<AudioSender> cached_audio_senders;
+        std::vector<AncillarySender> cached_ancillary_senders;
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          cached_video_senders = video_senders;
+          cached_audio_senders = audio_senders;
+          cached_ancillary_senders = ancillary_senders;
+          video_senders.clear();
+          audio_senders.clear();
+          ancillary_senders.clear();
+        }
 
         std::vector<VideoReceiver> cached_video_receivers;
         std::vector<AudioReceiver> cached_audio_receivers;
@@ -2023,10 +2490,6 @@ namespace seeder
           audio_receivers.clear();
           ancillary_receivers.clear();
         }
-
-        video_senders.clear();
-        audio_senders.clear();
-        ancillary_senders.clear();
 
         for (const auto &video : cached_video_senders)
         {
@@ -2056,11 +2519,12 @@ namespace seeder
 
       void add_video_sender(VideoSender video)
       {
-        if (video.enable == false)
+        bool exists = false;
         {
-          return;
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          exists = nullptr != find_video_sender_by_id(video.id);
         }
-        if (find_video_sender_by_id(video.id))
+        if (exists)
         {
           update_video_sender(video);
           return;
@@ -2101,7 +2565,10 @@ namespace seeder
           throw node_implementation_init_exception("add video sender connection failed!");
         }
         video.sender_id = sender_id;
-        video_senders.push_back(video);
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          video_senders.push_back(video);
+        }
         sender_ids_.push_back(sender_id);
         source_ids_.push_back(source_id);
         flow_ids_.push_back(flow_id);
@@ -2114,11 +2581,12 @@ namespace seeder
 
       void add_audio_sender(AudioSender audio)
       {
-        if (audio.enable == false)
+        bool exists = false;
         {
-          return;
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          exists = nullptr != find_audio_sender_by_id(audio.id);
         }
-        if (find_audio_sender_by_id(audio.id))
+        if (exists)
         {
           update_audio_sender(audio);
           return;
@@ -2164,7 +2632,10 @@ namespace seeder
           throw node_implementation_init_exception("insert audio connection sender failed!");
         }
         audio.sender_id = sender_id;
-        audio_senders.push_back(audio);
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          audio_senders.push_back(audio);
+        }
         sender_ids_.push_back(sender_id);
         source_ids_.push_back(source_id);
         flow_ids_.push_back(flow_id);
@@ -2177,11 +2648,12 @@ namespace seeder
 
       void add_ancillary_sender(AncillarySender ancillary)
       {
-        if (ancillary.enable == false)
+        bool exists = false;
         {
-          return;
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          exists = nullptr != find_ancillary_sender_by_id(ancillary.id);
         }
-        if (find_ancillary_sender_by_id(ancillary.id))
+        if (exists)
         {
           update_ancillary_sender(ancillary);
           return;
@@ -2217,7 +2689,10 @@ namespace seeder
           throw node_implementation_init_exception("add ancillary sender connection failed!");
         }
         ancillary.sender_id = sender_id;
-        ancillary_senders.push_back(ancillary);
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          ancillary_senders.push_back(ancillary);
+        }
         sender_ids_.push_back(sender_id);
         source_ids_.push_back(source_id);
         flow_ids_.push_back(flow_id);
@@ -2234,10 +2709,6 @@ namespace seeder
 
       void add_video_receiver(VideoReceiver video)
       {
-        if (video.enable == false)
-        {
-          return;
-        }
         bool exists = false;
         {
           std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
@@ -2278,10 +2749,6 @@ namespace seeder
 
       void add_audio_receiver(AudioReceiver audio)
       {
-        if (audio.enable == false)
-        {
-          return;
-        }
         bool exists = false;
         {
           std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
@@ -2325,10 +2792,6 @@ namespace seeder
 
       void add_ancillary_receiver(AncillaryReceiver ancillary)
       {
-        if (ancillary.enable == false)
-        {
-          return;
-        }
         bool exists = false;
         {
           std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
@@ -2371,8 +2834,12 @@ namespace seeder
 
       void remove_audio_sender(std::string id)
       {
-        AudioSender *audio_sender = find_audio_sender_by_id(id);
-        if (!audio_sender)
+        bool exists = false;
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          exists = nullptr != find_audio_sender_by_id(id);
+        }
+        if (!exists)
         {
           slog::log<slog::severities::error>(*gate_, SLOG_FLF)
               << nmos::stash_category(impl::categories::node_implementation)
@@ -2399,7 +2866,10 @@ namespace seeder
         remove_resource_after(delay_millis, node_model_.node_resources, flow_a_id,
                               *gate_, lock);
 
-        remove_audio_sender_by_sender_id(sender_a_id);
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          remove_audio_sender_by_sender_id(sender_a_id);
+        }
 
         const auto found_a_sender = boost::range::find(sender_ids_, sender_a_id);
         if (sender_ids_.end() != found_a_sender)
@@ -2429,8 +2899,12 @@ namespace seeder
 
       void remove_video_sender(std::string id)
       {
-        VideoSender *video = find_video_sender_by_id(id);
-        if (!video)
+        bool exists = false;
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          exists = nullptr != find_video_sender_by_id(id);
+        }
+        if (!exists)
         {
           slog::log<slog::severities::error>(*gate_, SLOG_FLF)
               << nmos::stash_category(impl::categories::node_implementation)
@@ -2457,7 +2931,10 @@ namespace seeder
         remove_resource_after(delay_millis, node_model_.node_resources, flow_v_id,
                               *gate_, lock);
 
-        remove_video_sender_by_sender_id(sender_v_id);
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          remove_video_sender_by_sender_id(sender_v_id);
+        }
 
         const auto found_v_sender = boost::range::find(sender_ids_, sender_v_id);
         if (sender_ids_.end() != found_v_sender)
@@ -2487,8 +2964,12 @@ namespace seeder
 
       void remove_ancillary_sender(std::string id)
       {
-        AncillarySender *ancillary = find_ancillary_sender_by_id(id);
-        if (!ancillary)
+        bool exists = false;
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          exists = nullptr != find_ancillary_sender_by_id(id);
+        }
+        if (!exists)
         {
           slog::log<slog::severities::error>(*gate_, SLOG_FLF)
               << nmos::stash_category(impl::categories::node_implementation)
@@ -2513,7 +2994,10 @@ namespace seeder
         remove_resource_after(delay_millis, node_model_.node_resources, flow_id,
                               *gate_, lock);
 
-        remove_ancillary_sender_by_sender_id(sender_id);
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          remove_ancillary_sender_by_sender_id(sender_id);
+        }
 
         const auto found_sender = boost::range::find(sender_ids_, sender_id);
         if (sender_ids_.end() != found_sender)
@@ -2818,7 +3302,7 @@ namespace seeder
             seed_id_, nmos::types::flow, impl::ports::video, id);
         const auto sender_id = impl::make_id(
             seed_id_, nmos::types::sender, impl::ports::video, id);
-        const bool ST_2022_7 = video.redudancy.enable;
+        const bool ST_2022_7 = video.redudancy.present;
 
         nmos::rational frame_rate = nmos::parse_rational(
             web::json::value_of({{nmos::fields::numerator,
@@ -2846,10 +3330,11 @@ namespace seeder
         const auto manifest_href =
             nmos::experimental::make_manifest_api_manifest(
                 sender_id, node_model_.settings);
+        const auto interface_selection = select_runtime_interfaces(
+            runtime_interfaces_snapshot(), video.source_ip,
+            video.redudancy.source_ip, ST_2022_7);
         const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
+            selected_interface_names(interface_selection, ST_2022_7);
         auto sender = nmos::make_sender(
             sender_id, flow_id, nmos::transports::rtp_mcast, device_id_,
             manifest_href.to_string(), interface_names, node_model_.settings);
@@ -2860,17 +3345,17 @@ namespace seeder
             nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
         connection_sender
             .data[nmos::fields::endpoint_constraints][0][nmos::fields::source_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
+            interface_address_constraint(interface_selection.primary);
         if (ST_2022_7)
         {
           connection_sender.data[nmos::fields::endpoint_constraints][1]
                                 [nmos::fields::source_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
+              interface_address_constraint(interface_selection.redundancy);
         }
         auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
-        staged[nmos::fields::master_enable] = value::boolean(true);
+        auto &active = connection_sender.data[nmos::fields::endpoint_active];
+        initialize_sender_endpoint_enable(staged, active, video.enable,
+                                          video.redudancy.enable);
         staged[nmos::fields::activation] =
             value_of({{nmos::fields::mode,
                        nmos::activation_modes::activate_scheduled_relative.name},
@@ -2917,11 +3402,12 @@ namespace seeder
         const auto manifest_href =
             nmos::experimental::make_manifest_api_manifest(
                 sender_id, node_model_.settings);
-        const bool ST_2022_7 = audio.redudancy.enable;
+        const bool ST_2022_7 = audio.redudancy.present;
+        const auto interface_selection = select_runtime_interfaces(
+            runtime_interfaces_snapshot(), audio.source_ip,
+            audio.redudancy.source_ip, ST_2022_7);
         const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
+            selected_interface_names(interface_selection, ST_2022_7);
         auto sender = nmos::make_sender(
             sender_id, flow_id, nmos::transports::rtp_mcast, device_id_,
             manifest_href.to_string(), interface_names, node_model_.settings);
@@ -2932,17 +3418,17 @@ namespace seeder
             nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
         connection_sender
             .data[nmos::fields::endpoint_constraints][0][nmos::fields::source_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
+            interface_address_constraint(interface_selection.primary);
         if (ST_2022_7)
         {
           connection_sender.data[nmos::fields::endpoint_constraints][1]
                                 [nmos::fields::source_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
+              interface_address_constraint(interface_selection.redundancy);
         }
         auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
-        staged[nmos::fields::master_enable] = value::boolean(true);
+        auto &active = connection_sender.data[nmos::fields::endpoint_active];
+        initialize_sender_endpoint_enable(staged, active, audio.enable,
+                                          audio.redudancy.enable);
         staged[nmos::fields::activation] =
             value_of({{nmos::fields::mode,
                        nmos::activation_modes::activate_scheduled_relative.name},
@@ -2998,11 +3484,12 @@ namespace seeder
         const auto manifest_href =
             nmos::experimental::make_manifest_api_manifest(
                 sender_id, node_model_.settings);
-        const bool ST_2022_7 = ancillary.redudancy.enable;
+        const bool ST_2022_7 = ancillary.redudancy.present;
+        const auto interface_selection = select_runtime_interfaces(
+            runtime_interfaces_snapshot(), ancillary.source_ip,
+            ancillary.redudancy.source_ip, ST_2022_7);
         const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
+            selected_interface_names(interface_selection, ST_2022_7);
         auto sender = nmos::make_sender(
             sender_id, flow_id, nmos::transports::rtp_mcast, device_id_,
             manifest_href.to_string(), interface_names, node_model_.settings);
@@ -3013,17 +3500,17 @@ namespace seeder
             nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
         connection_sender
             .data[nmos::fields::endpoint_constraints][0][nmos::fields::source_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
+            interface_address_constraint(interface_selection.primary);
         if (ST_2022_7)
         {
           connection_sender.data[nmos::fields::endpoint_constraints][1]
                                 [nmos::fields::source_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
+              interface_address_constraint(interface_selection.redundancy);
         }
         auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
-        staged[nmos::fields::master_enable] = value::boolean(true);
+        auto &active = connection_sender.data[nmos::fields::endpoint_active];
+        initialize_sender_endpoint_enable(staged, active, ancillary.enable,
+                                          ancillary.redudancy.enable);
         staged[nmos::fields::activation] =
             value_of({{nmos::fields::mode,
                        nmos::activation_modes::activate_scheduled_relative.name},
@@ -3038,20 +3525,19 @@ namespace seeder
       {
         std::string id = video.id;
         std::string name = video.name;
-        const bool ST_2022_7 = video.redudancy.enable;
+        const bool ST_2022_7 = video.redudancy.present;
         const auto receiver_id = make_video_receiver_resource_id(id);
-        const auto primary_interface_ip =
-            receiver_interface_ip_or_default(video.source_ip, primary_interface);
-        const auto secondary_interface_ip =
-            first_interface_address(secondary_interface);
+        const auto interface_selection = select_runtime_interfaces(
+            runtime_interfaces_snapshot(), video.source_ip,
+            video.redudancy.source_ip, ST_2022_7);
+        const auto primary_interface_ip = interface_selection.primary.ip;
+        const auto secondary_interface_ip = interface_selection.redundancy.ip;
         const auto secondary_multicast_ip =
             receiver_multicast_ip_or_default(video.redudancy.ip, video.ip);
         const auto secondary_port =
             receiver_port_or_default(video.redudancy.port, video.port);
         const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
+            selected_interface_names(interface_selection, ST_2022_7);
 
         nmos::resource receiver = nmos::make_receiver(
             receiver_id, device_id_, nmos::transports::rtp_mcast,
@@ -3135,8 +3621,7 @@ namespace seeder
             nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
         connection_receiver.data[nmos::fields::endpoint_constraints][0]
                                 [nmos::fields::interface_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
+            interface_address_constraint(interface_selection.primary);
         auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
         auto &active = connection_receiver.data[nmos::fields::endpoint_active];
         staged[nmos::fields::master_enable] = value::boolean(true);
@@ -3148,8 +3633,7 @@ namespace seeder
               secondary_multicast_ip, secondary_interface_ip, secondary_port);
           connection_receiver.data[nmos::fields::endpoint_constraints][1]
                                   [nmos::fields::interface_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
+              interface_address_constraint(interface_selection.redundancy);
         }
         else
         {
@@ -3164,20 +3648,19 @@ namespace seeder
       {
         std::string id = audio.id;
         std::string name = audio.name;
-        const bool ST_2022_7 = audio.redudancy.enable;
-        const auto primary_interface_ip =
-            receiver_interface_ip_or_default(audio.source_ip, primary_interface);
-        const auto secondary_interface_ip =
-            first_interface_address(secondary_interface);
+        const bool ST_2022_7 = audio.redudancy.present;
+        const auto interface_selection = select_runtime_interfaces(
+            runtime_interfaces_snapshot(), audio.source_ip,
+            audio.redudancy.source_ip, ST_2022_7);
+        const auto primary_interface_ip = interface_selection.primary.ip;
+        const auto secondary_interface_ip = interface_selection.redundancy.ip;
         const auto secondary_multicast_ip =
             receiver_multicast_ip_or_default(audio.redudancy.ip, audio.ip);
         const auto secondary_port =
             receiver_port_or_default(audio.redudancy.port, audio.port);
         const auto receiver_id = make_audio_receiver_resource_id(id);
         const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
+            selected_interface_names(interface_selection, ST_2022_7);
 
         nmos::resource receiver = nmos::make_audio_receiver(
             receiver_id, device_id_, nmos::transports::rtp_mcast,
@@ -3189,8 +3672,7 @@ namespace seeder
             nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
         connection_receiver.data[nmos::fields::endpoint_constraints][0]
                                 [nmos::fields::interface_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
+            interface_address_constraint(interface_selection.primary);
         auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
         auto &active = connection_receiver.data[nmos::fields::endpoint_active];
         staged[nmos::fields::master_enable] = value::boolean(true);
@@ -3202,8 +3684,7 @@ namespace seeder
               secondary_multicast_ip, secondary_interface_ip, secondary_port);
           connection_receiver.data[nmos::fields::endpoint_constraints][1]
                                   [nmos::fields::interface_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
+              interface_address_constraint(interface_selection.redundancy);
         }
         else
         {
@@ -3219,20 +3700,19 @@ namespace seeder
       {
         std::string id = ancillary.id;
         std::string name = ancillary.name;
-        const bool ST_2022_7 = ancillary.redudancy.enable;
-        const auto primary_interface_ip = receiver_interface_ip_or_default(
-            ancillary.source_ip, primary_interface);
-        const auto secondary_interface_ip =
-            first_interface_address(secondary_interface);
+        const bool ST_2022_7 = ancillary.redudancy.present;
+        const auto interface_selection = select_runtime_interfaces(
+            runtime_interfaces_snapshot(), ancillary.source_ip,
+            ancillary.redudancy.source_ip, ST_2022_7);
+        const auto primary_interface_ip = interface_selection.primary.ip;
+        const auto secondary_interface_ip = interface_selection.redundancy.ip;
         const auto secondary_multicast_ip = receiver_multicast_ip_or_default(
             ancillary.redudancy.ip, ancillary.ip);
         const auto secondary_port =
             receiver_port_or_default(ancillary.redudancy.port, ancillary.port);
         const auto receiver_id = make_ancillary_receiver_resource_id(id);
         const auto interface_names =
-            ST_2022_7 ? std::vector<utility::string_t>{primary_interface.name,
-                                                       secondary_interface.name}
-                      : std::vector<utility::string_t>{primary_interface.name};
+            selected_interface_names(interface_selection, ST_2022_7);
 
         nmos::resource receiver = nmos::make_sdianc_data_receiver(
             receiver_id, device_id_, nmos::transports::rtp_mcast,
@@ -3247,8 +3727,7 @@ namespace seeder
             nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
         connection_receiver.data[nmos::fields::endpoint_constraints][0]
                                 [nmos::fields::interface_ip] =
-            value_of({{nmos::fields::constraint_enum,
-                       value_from_elements(primary_interface.addresses)}});
+            interface_address_constraint(interface_selection.primary);
         auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
         auto &active = connection_receiver.data[nmos::fields::endpoint_active];
         staged[nmos::fields::master_enable] = value::boolean(true);
@@ -3261,8 +3740,7 @@ namespace seeder
               secondary_port);
           connection_receiver.data[nmos::fields::endpoint_constraints][1]
                                   [nmos::fields::interface_ip] =
-              value_of({{nmos::fields::constraint_enum,
-                         value_from_elements(secondary_interface.addresses)}});
+              interface_address_constraint(interface_selection.redundancy);
         }
         else
         {
@@ -3276,12 +3754,12 @@ namespace seeder
 
       void update_video_sender(VideoSender video)
       {
-        if (!video.enable)
+        bool exists = false;
         {
-          remove_video_sender(video.id);
-          return;
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          exists = nullptr != find_video_sender_by_id(video.id);
         }
-        if (!find_video_sender_by_id(video.id))
+        if (!exists)
         {
           add_video_sender(video);
           return;
@@ -3292,20 +3770,23 @@ namespace seeder
             seed_id_, nmos::types::sender, impl::ports::video, video.id);
         auto resources = make_video_sender_resources(video);
         replace_sender_resources("update video sender", std::move(resources),
-                                  video.redudancy.enable);
+                                  video.redudancy.present);
         video.sender_id = sender_id;
-        replace_cached_by_id(video_senders, video);
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          replace_cached_by_id(video_senders, video);
+        }
         node_model_.notify();
       }
 
       void update_audio_sender(AudioSender audio)
       {
-        if (!audio.enable)
+        bool exists = false;
         {
-          remove_audio_sender(audio.id);
-          return;
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          exists = nullptr != find_audio_sender_by_id(audio.id);
         }
-        if (!find_audio_sender_by_id(audio.id))
+        if (!exists)
         {
           add_audio_sender(audio);
           return;
@@ -3316,19 +3797,17 @@ namespace seeder
             seed_id_, nmos::types::sender, impl::ports::audio, audio.id);
         auto resources = make_audio_sender_resources(audio);
         replace_sender_resources("update audio sender", std::move(resources),
-                                  audio.redudancy.enable);
+                                  audio.redudancy.present);
         audio.sender_id = sender_id;
-        replace_cached_by_id(audio_senders, audio);
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          replace_cached_by_id(audio_senders, audio);
+        }
         node_model_.notify();
       }
 
       void update_video_receiver(VideoReceiver video)
       {
-        if (!video.enable)
-        {
-          remove_video_receiver(video.id);
-          return;
-        }
         bool exists = false;
         {
           std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
@@ -3343,7 +3822,7 @@ namespace seeder
         nmos::write_lock lock = node_model_.write_lock();
         auto resources = make_video_receiver_resources(video);
         replace_receiver_resources("update video receiver", std::move(resources),
-                                   video.redudancy.enable);
+                                   video.redudancy.present);
         {
           std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
           replace_cached_by_id(video_receivers, video);
@@ -3353,11 +3832,6 @@ namespace seeder
 
       void update_audio_receiver(AudioReceiver audio)
       {
-        if (!audio.enable)
-        {
-          remove_audio_receiver(audio.id);
-          return;
-        }
         bool exists = false;
         {
           std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
@@ -3372,7 +3846,7 @@ namespace seeder
         nmos::write_lock lock = node_model_.write_lock();
         auto resources = make_audio_receiver_resources(audio);
         replace_receiver_resources("update audio receiver", std::move(resources),
-                                   audio.redudancy.enable);
+                                   audio.redudancy.present);
         {
           std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
           replace_cached_by_id(audio_receivers, audio);
@@ -3382,12 +3856,12 @@ namespace seeder
 
       void update_ancillary_sender(AncillarySender ancillary)
       {
-        if (!ancillary.enable)
+        bool exists = false;
         {
-          remove_ancillary_sender(ancillary.id);
-          return;
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          exists = nullptr != find_ancillary_sender_by_id(ancillary.id);
         }
-        if (!find_ancillary_sender_by_id(ancillary.id))
+        if (!exists)
         {
           add_ancillary_sender(ancillary);
           return;
@@ -3398,19 +3872,17 @@ namespace seeder
             seed_id_, nmos::types::sender, impl::ports::data, ancillary.id);
         auto resources = make_ancillary_sender_resources(ancillary);
         replace_sender_resources("update ancillary sender", std::move(resources),
-                                  ancillary.redudancy.enable);
+                                  ancillary.redudancy.present);
         ancillary.sender_id = sender_id;
-        replace_cached_by_id(ancillary_senders, ancillary);
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          replace_cached_by_id(ancillary_senders, ancillary);
+        }
         node_model_.notify();
       }
 
       void update_ancillary_receiver(AncillaryReceiver ancillary)
       {
-        if (!ancillary.enable)
-        {
-          remove_ancillary_receiver(ancillary.id);
-          return;
-        }
         bool exists = false;
         {
           std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
@@ -3426,12 +3898,33 @@ namespace seeder
         auto resources = make_ancillary_receiver_resources(ancillary);
         replace_receiver_resources("update ancillary receiver",
                                    std::move(resources),
-                                   ancillary.redudancy.enable);
+                                   ancillary.redudancy.present);
         {
           std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
           replace_cached_by_id(ancillary_receivers, ancillary);
         }
         node_model_.notify();
+      }
+
+      void set_update_video_sender_callback(
+          std::function<void(const VideoSender &video)> func)
+      {
+        std::lock_guard<std::mutex> callback_lock(callback_mutex_);
+        update_video_sender_func = std::move(func);
+      }
+
+      void set_update_audio_sender_callback(
+          std::function<void(const AudioSender &audio)> func)
+      {
+        std::lock_guard<std::mutex> callback_lock(callback_mutex_);
+        update_audio_sender_func = std::move(func);
+      }
+
+      void set_update_ancillary_sender_callback(
+          std::function<void(const AncillarySender &ancillary)> func)
+      {
+        std::lock_guard<std::mutex> callback_lock(callback_mutex_);
+        update_ancillary_sender_func = std::move(func);
       }
 
       void set_update_video_receiver_callback(
@@ -3463,12 +3956,70 @@ namespace seeder
       }
 
       void set_runtime_interfaces(
-          const web::hosts::experimental::host_interface &primary,
-          const web::hosts::experimental::host_interface &secondary)
+          std::vector<web::hosts::experimental::host_interface> interfaces)
       {
         nmos::write_lock lock = node_model_.write_lock();
-        primary_interface = primary;
-        secondary_interface = secondary;
+        {
+          std::lock_guard<std::mutex> runtime_interfaces_lock(
+              runtime_interfaces_mutex_);
+          runtime_interfaces_ = std::move(interfaces);
+        }
+
+        std::vector<VideoSender> cached_video_senders;
+        std::vector<AudioSender> cached_audio_senders;
+        std::vector<AncillarySender> cached_ancillary_senders;
+        std::vector<VideoReceiver> cached_video_receivers;
+        std::vector<AudioReceiver> cached_audio_receivers;
+        std::vector<AncillaryReceiver> cached_ancillary_receivers;
+        {
+          std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+          cached_video_senders = video_senders;
+          cached_audio_senders = audio_senders;
+          cached_ancillary_senders = ancillary_senders;
+        }
+        {
+          std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+          cached_video_receivers = video_receivers;
+          cached_audio_receivers = audio_receivers;
+          cached_ancillary_receivers = ancillary_receivers;
+        }
+
+        for (const auto &video : cached_video_senders)
+        {
+          replace_sender_resources("runtime interfaces update video sender",
+                                   make_video_sender_resources(video),
+                                   video.redudancy.present);
+        }
+        for (const auto &audio : cached_audio_senders)
+        {
+          replace_sender_resources("runtime interfaces update audio sender",
+                                   make_audio_sender_resources(audio),
+                                   audio.redudancy.present);
+        }
+        for (const auto &ancillary : cached_ancillary_senders)
+        {
+          replace_sender_resources("runtime interfaces update ancillary sender",
+                                   make_ancillary_sender_resources(ancillary),
+                                   ancillary.redudancy.present);
+        }
+        for (const auto &video : cached_video_receivers)
+        {
+          replace_receiver_resources("runtime interfaces update video receiver",
+                                     make_video_receiver_resources(video),
+                                     video.redudancy.present);
+        }
+        for (const auto &audio : cached_audio_receivers)
+        {
+          replace_receiver_resources("runtime interfaces update audio receiver",
+                                     make_audio_receiver_resources(audio),
+                                     audio.redudancy.present);
+        }
+        for (const auto &ancillary : cached_ancillary_receivers)
+        {
+          replace_receiver_resources("runtime interfaces update ancillary receiver",
+                                     make_ancillary_receiver_resources(ancillary),
+                                     ancillary.redudancy.present);
+        }
 
         for (const auto &sender_id : sender_ids_)
         {
@@ -4062,6 +4613,24 @@ namespace seeder
       p_impl->update_ancillary_receiver(ancillary);
     }
 
+    void Node::set_update_video_sender_callback(
+        std::function<void(const VideoSender &video)> func)
+    {
+      p_impl->set_update_video_sender_callback(std::move(func));
+    }
+
+    void Node::set_update_audio_sender_callback(
+        std::function<void(const AudioSender &audio)> func)
+    {
+      p_impl->set_update_audio_sender_callback(std::move(func));
+    }
+
+    void Node::set_update_ancillary_sender_callback(
+        std::function<void(const AncillarySender &ancillary)> func)
+    {
+      p_impl->set_update_ancillary_sender_callback(std::move(func));
+    }
+
     void Node::set_update_video_receiver_callback(
         std::function<void(const VideoReceiver &video)> func)
     {
@@ -4100,10 +4669,9 @@ namespace seeder
       p_impl->write_persisted_settings(settings);
     }
     void Node::set_runtime_interfaces(
-        const web::hosts::experimental::host_interface &primary,
-        const web::hosts::experimental::host_interface &secondary)
+        std::vector<web::hosts::experimental::host_interface> interfaces)
     {
-      p_impl->set_runtime_interfaces(primary, secondary);
+      p_impl->set_runtime_interfaces(std::move(interfaces));
     }
     void Node::set_ptp_clock(std::string gmtid, bool locked, int ptp_domain)
     {

@@ -2,6 +2,7 @@
 
 #include <cpprest/http_client.h>
 
+#include <exception>
 #include <iostream>
 #include <stdexcept>
 
@@ -29,7 +30,15 @@ namespace seeder::nmos_sync
     std::string response_body = json.serialize();
     std::cerr << "nmos-sync-daemon snapshot response, url=" << snapshot_url_
               << ", body=" << response_body << std::endl;
-    return snapshot_from_json(json);
+    try
+    {
+      return snapshot_from_json(json);
+    }
+    catch (const std::exception &error)
+    {
+      throw std::runtime_error("snapshot parse failed, url=" + snapshot_url_ +
+                               ", error=" + error.what());
+    }
   }
 
 }

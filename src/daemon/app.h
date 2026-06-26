@@ -40,6 +40,7 @@ private:
   void handle_ws_connected();
   void handle_ws_disconnected();
   void handle_ws_error(const std::string &message);
+  void handle_sender_event(const SenderEvent &event);
   void handle_receiver_event(const ReceiverEvent &event);
   void handle_registration_event(const RegistrationEvent &event);
   void set_node_state(const std::string &state);

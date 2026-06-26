@@ -1,5 +1,6 @@
 #include "reconcile_engine.h"
 
+#include <stdexcept>
 #include <unordered_map>
 
 namespace seeder::nmos_sync {
@@ -18,11 +19,20 @@ ResourceMap<T> make_map(const std::vector<T> &items) {
   return map;
 }
 
+std::runtime_error reconcile_error(const char *resource_type, const char *action,
+                                   const std::string &id,
+                                   const std::exception &error) {
+  return std::runtime_error(std::string("snapshot apply failed, resource=") +
+                            resource_type + ", action=" + action +
+                            ", id=" + id + ", error=" + error.what());
+}
+
 }
 
 template <typename T, typename Equivalent, typename Remove, typename Update,
           typename Add>
-void ReconcileEngine::reconcile_list(const std::vector<T> &current,
+void ReconcileEngine::reconcile_list(const char *resource_type,
+                                      const std::vector<T> &current,
                                       const std::vector<T> &next,
                                       Equivalent equivalent, Remove remove,
                                       Update update, Add add) {
@@ -32,18 +42,30 @@ void ReconcileEngine::reconcile_list(const std::vector<T> &current,
   for (const auto &[id, current_item] : current_map) {
     const auto found = next_map.find(id);
     if (found == next_map.end()) {
-      remove(id);
+      try {
+        remove(id);
+      } catch (const std::exception &error) {
+        throw reconcile_error(resource_type, "remove", id, error);
+      }
       continue;
     }
     if (!equivalent(current_item, found->second)) {
-      update(found->second);
+      try {
+        update(found->second);
+      } catch (const std::exception &error) {
+        throw reconcile_error(resource_type, "update", id, error);
+      }
     }
   }
 
   for (const auto &[id, next_item] : next_map) {
     const auto found = current_map.find(id);
     if (found == current_map.end()) {
-      add(next_item);
+      try {
+        add(next_item);
+      } catch (const std::exception &error) {
+        throw reconcile_error(resource_type, "add", id, error);
+      }
     }
   }
 }
@@ -59,7 +81,8 @@ void ReconcileEngine::apply_snapshot(
   if (current.devices != new_snapshot.devices) {
     runtime.set_runtime_devices(new_snapshot.devices);
   }
-  reconcile_list(current.video_receivers, new_snapshot.video_receivers,
+  reconcile_list("video_receiver", current.video_receivers,
+                   new_snapshot.video_receivers,
                   [](const nmos_node::VideoReceiver &lhs,
                      const nmos_node::VideoReceiver &rhs)
                   { return equivalent(lhs, rhs); },
@@ -68,7 +91,8 @@ void ReconcileEngine::apply_snapshot(
                   { runtime.update_video_receiver(receiver); },
                   [&](const nmos_node::VideoReceiver &receiver)
                   { runtime.apply_video_receiver(receiver); });
-  reconcile_list(current.audio_receivers, new_snapshot.audio_receivers,
+  reconcile_list("audio_receiver", current.audio_receivers,
+                   new_snapshot.audio_receivers,
                   [](const nmos_node::AudioReceiver &lhs,
                      const nmos_node::AudioReceiver &rhs)
                   { return equivalent(lhs, rhs); },
@@ -77,7 +101,7 @@ void ReconcileEngine::apply_snapshot(
                   { runtime.update_audio_receiver(receiver); },
                   [&](const nmos_node::AudioReceiver &receiver)
                   { runtime.apply_audio_receiver(receiver); });
-  reconcile_list(current.ancillary_receivers,
+  reconcile_list("ancillary_receiver", current.ancillary_receivers,
                  new_snapshot.ancillary_receivers,
                  [](const nmos_node::AncillaryReceiver &lhs,
                     const nmos_node::AncillaryReceiver &rhs)
@@ -89,7 +113,8 @@ void ReconcileEngine::apply_snapshot(
                   [&](const nmos_node::AncillaryReceiver &receiver)
                   { runtime.apply_ancillary_receiver(receiver); });
 
-  reconcile_list(current.video_senders, new_snapshot.video_senders,
+  reconcile_list("video_sender", current.video_senders,
+                   new_snapshot.video_senders,
                   [](const nmos_node::VideoSender &lhs,
                      const nmos_node::VideoSender &rhs)
                   { return equivalent(lhs, rhs); },
@@ -98,7 +123,8 @@ void ReconcileEngine::apply_snapshot(
                   { runtime.update_video_sender(sender); },
                   [&](const nmos_node::VideoSender &sender)
                   { runtime.apply_video_sender(sender); });
-  reconcile_list(current.audio_senders, new_snapshot.audio_senders,
+  reconcile_list("audio_sender", current.audio_senders,
+                   new_snapshot.audio_senders,
                   [](const nmos_node::AudioSender &lhs,
                      const nmos_node::AudioSender &rhs)
                   { return equivalent(lhs, rhs); },
@@ -107,7 +133,8 @@ void ReconcileEngine::apply_snapshot(
                   { runtime.update_audio_sender(sender); },
                   [&](const nmos_node::AudioSender &sender)
                   { runtime.apply_audio_sender(sender); });
-  reconcile_list(current.ancillary_senders, new_snapshot.ancillary_senders,
+  reconcile_list("ancillary_sender", current.ancillary_senders,
+                  new_snapshot.ancillary_senders,
                  [](const nmos_node::AncillarySender &lhs,
                     const nmos_node::AncillarySender &rhs)
                   { return equivalent(lhs, rhs); },

@@ -102,6 +102,12 @@ web::json::value make_node_lifecycle_message(const std::string &old_state,
                                              const std::string &new_state);
 web::json::value make_sync_failed_message(const SyncFailedMessage &message);
 web::json::value make_streams_drained_message();
+web::json::value make_sender_video_observed_changed_message(
+    const nmos_node::VideoSender &sender);
+web::json::value make_sender_audio_observed_changed_message(
+    const nmos_node::AudioSender &sender);
+web::json::value make_sender_ancillary_observed_changed_message(
+    const nmos_node::AncillarySender &sender);
 web::json::value make_receiver_video_observed_changed_message(
     const nmos_node::VideoReceiver &receiver);
 web::json::value make_receiver_audio_observed_changed_message(

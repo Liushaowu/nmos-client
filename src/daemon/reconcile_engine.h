@@ -18,9 +18,9 @@ public:
 private:
   template <typename T, typename Equivalent, typename Remove, typename Update,
             typename Add>
-  void reconcile_list(const std::vector<T> &current, const std::vector<T> &next,
-                      Equivalent equivalent, Remove remove, Update update,
-                      Add add);
+  void reconcile_list(const char *resource_type, const std::vector<T> &current,
+                      const std::vector<T> &next, Equivalent equivalent,
+                      Remove remove, Update update, Add add);
 };
 
 }

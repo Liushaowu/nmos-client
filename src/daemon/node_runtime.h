@@ -17,6 +17,12 @@ struct ReceiverEvent {
   Payload payload;
 };
 
+struct SenderEvent {
+  using Payload = std::variant<nmos_node::VideoSender, nmos_node::AudioSender,
+                               nmos_node::AncillarySender>;
+  Payload payload;
+};
+
 struct RegistrationEvent {
   nmos_node::RegistrationStatus status;
 };
@@ -30,6 +36,8 @@ public:
 
   void set_receiver_event_handler(
       std::function<void(const ReceiverEvent &event)> handler);
+  void set_sender_event_handler(
+      std::function<void(const SenderEvent &event)> handler);
   void set_registration_event_handler(
       std::function<void(const RegistrationEvent &event)> handler);
 
@@ -63,10 +71,12 @@ public:
 
 private:
   void publish_event(const ReceiverEvent &event);
+  void publish_event(const SenderEvent &event);
   void publish_event(const RegistrationEvent &event);
 
   nmos_node::Node node_;
   std::function<void(const ReceiverEvent &event)> receiver_event_handler_;
+  std::function<void(const SenderEvent &event)> sender_event_handler_;
   std::function<void(const RegistrationEvent &event)> registration_event_handler_;
   std::mutex callback_mutex_;
 };

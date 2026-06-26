@@ -16,6 +16,7 @@ namespace seeder
 
     struct Redudancy
     {
+      bool present = false;
       bool enable = false;
       std::string source_ip;
       std::string ip;
@@ -157,6 +158,12 @@ namespace seeder
       void remove_audio_receiver(std::string id);
       void remove_ancillary_receiver(std::string id);
 
+      void set_update_video_sender_callback(
+          std::function<void(const VideoSender &video)> func);
+      void set_update_audio_sender_callback(
+          std::function<void(const AudioSender &audio)> func);
+      void set_update_ancillary_sender_callback(
+          std::function<void(const AncillarySender &ancillary)> func);
       void set_update_video_receiver_callback(
           std::function<void(const VideoReceiver &video)> func);
       void set_update_audio_receiver_callback(
@@ -170,8 +177,7 @@ namespace seeder
       web::json::value discover_registration_apis() const;
       void write_persisted_settings(const web::json::value &settings);
       void set_runtime_interfaces(
-          const web::hosts::experimental::host_interface &primary,
-          const web::hosts::experimental::host_interface &secondary);
+          std::vector<web::hosts::experimental::host_interface> interfaces);
 
       void set_ptp_clock(std::string gmtid, bool locked, int ptp_domain = 127);
     };
