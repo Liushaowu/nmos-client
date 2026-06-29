@@ -40,6 +40,7 @@
 #include <functional>
 #include <ifaddrs.h>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <netinet/in.h>
 #include <optional>
@@ -204,6 +205,8 @@ namespace seeder
       internal::NodeEventBridge event_bridge_;
       internal::NodeResourceController resource_controller_;
       internal::NodeRuntimeInterfaceUpdater runtime_interface_updater_;
+      std::shared_ptr<lldp::lldp_manager> lldp_manager_;
+      std::shared_ptr<lldp::lldp_manager_guard> lldp_manager_guard_;
 
       Impl()
           : event_bridge_(internal::NodeEventBridgeContext{callbacks_}),
@@ -576,8 +579,10 @@ namespace seeder
         #ifdef HAVE_LLDP
           slog::log<slog::severities::info>(*gate_, SLOG_FLF) << "Attempting to configure LLDP";
           auto lldp_manager = nmos::experimental::make_lldp_manager(node_model_, interfaces, true, *gate_);
+          lldp_manager_= std::make_shared<lldp::lldp_manager>(std::move(lldp_manager));
           // hm, open may potentially throw?
-          lldp::lldp_manager_guard lldp_manager_guard(lldp_manager);
+          // lldp::lldp_manager_guard lldp_manager_guard(lldp_manager);
+          lldp_manager_guard_ = std::make_shared<lldp::lldp_manager_guard>(*lldp_manager_);
        #endif
         {
           std::vector<nmos::id> empty;

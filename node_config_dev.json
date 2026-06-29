@@ -80,8 +80,8 @@
     "no_trailing_dot_for_authorization_callback_uri": true,
     "service_unavailable_retry_after": 5,
     "manufacturer_name": "SEEDER",
-    "host_addresses":["192.168.123.195"],
-    "interfaces":["eno1"],
-    "registry_address": "192.168.123.219",
-    "registry_port":3210
+    "host_addresses":["192.168.123.248"],
+    "registry_address": "192.168.123.204",
+    "registry_port":3210,
+    "logging_level": -40
 }

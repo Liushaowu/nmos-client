@@ -1,7 +1,6 @@
 #pragma once
 #ifndef NMOS_CPP_NODE_NODE_IMPLEMENTATION_H
 #define NMOS_CPP_NODE_NODE_IMPLEMENTATION_H
-
 #include <nmos/id.h>
 
 #include "cpprest/host_utils.h"
@@ -23,9 +22,6 @@
 #include <nmos/type.h>
 #include <slog/all_in_one.h>
 #include <string>
-#ifdef HAVE_LLDP
-#include "lldp/lldp_manager.h"
-#endif
 #include "nmos/activation_mode.h"
 #include "nmos/capabilities.h"
 #include "nmos/channelmapping_resources.h"

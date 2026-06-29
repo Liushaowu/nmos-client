@@ -1,5 +1,5 @@
 {
-  "node_config_path": "/home/seeder/lsw/workspace/nmos-client-opencode/node_config_dev.json",
+  "node_config_path": "/home/seeder/dev/nmos/nmos-client-opencode/node_config_dev.json",
   "snapshot_url": "http://127.0.0.1/api/data/nmos",
   "ws_url": "ws://127.0.0.1/ws/nmos",
   "pull_timeout_ms": 3000,
