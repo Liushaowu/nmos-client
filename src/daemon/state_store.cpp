@@ -73,12 +73,7 @@ void StateStore::clear_last_snapshot() {
 
 void StateStore::set_registry_status(const nmos_node::RegistrationStatus &status) {
   std::lock_guard<std::mutex> lock(mutex_);
-  registry_status_.connected = status.connected;
-  registry_status_.uri = status.uri;
-  registry_status_.scheme = status.scheme;
-  registry_status_.host = status.host;
-  registry_status_.port = status.port;
-  registry_status_.version = status.version;
+  registry_status_ = status;
 }
 
 StatusSnapshot StateStore::status() const {
@@ -86,7 +81,7 @@ StatusSnapshot StateStore::status() const {
   return status_;
 }
 
-RegistrySnapshot StateStore::registry_status() const {
+nmos_node::RegistrationStatus StateStore::registry_status() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return registry_status_;
 }

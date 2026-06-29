@@ -1,7 +1,7 @@
 #pragma once
 
+#include "../node.h"
 #include "dto.h"
-#include "node_runtime.h"
 
 #include <optional>
 #include <string>
@@ -11,9 +11,9 @@ namespace seeder::nmos_sync {
 class ReconcileEngine {
 public:
   void apply_snapshot(const std::optional<SnapshotDto> &current_snapshot,
-                      const SnapshotDto &new_snapshot, NodeRuntime &runtime);
+                      const SnapshotDto &new_snapshot, nmos_node::Node &node);
   void drain_all(const std::optional<SnapshotDto> &current_snapshot,
-                 NodeRuntime &runtime);
+                 nmos_node::Node &node);
 
 private:
   template <typename T, typename Equivalent, typename Remove, typename Update,

@@ -1,127 +1,16 @@
 #pragma once
 
-#include <functional>
+#include "node_callbacks.h"
+#include "node_runtime_types.h"
+#include "node_types.h"
+
 #include <memory>
 #include <string>
-#include <vector>
 
-#include <cpprest/json.h>
-#include <cpprest/host_utils.h>
-
-const unsigned int delay_millis{0};
 namespace seeder
 {
   namespace nmos_node
   {
-
-    struct Redudancy
-    {
-      bool present = false;
-      bool enable = false;
-      std::string source_ip;
-      std::string ip;
-      int port;
-    };
-
-    struct VideoSender
-    {
-      std::string id;
-      std::string sender_id;
-      std::string name;
-      bool enable = false;
-      std::string video_format;
-      std::string colorspace = "BT709";
-      std::string transfer_characteristics = "SDR";
-      std::string source_ip;
-      std::string ip;
-      int port;
-      Redudancy redudancy;
-      int pg_format;
-    };
-
-    struct AudioSender
-    {
-      std::string id;
-      std::string sender_id;
-      std::string name;
-      std::string source_ip;
-      bool enable = false;
-      int channel_count;
-      int bit_depth;
-      int sample_rate;
-      std::string ip;
-      int port;
-      Redudancy redudancy;
-    };
-
-    struct VideoReceiverCaps
-    {
-      std::vector<std::string> formats;
-      std::vector<std::string> colorspaces;
-      std::vector<std::string> transfer_characteristics;
-    };
-    struct VideoReceiver
-    {
-      std::string id;
-      std::string name;
-      std::string source_ip;
-      std::string ip;
-      int port;
-      bool enable = false;
-      Redudancy redudancy;
-      // 能力
-      VideoReceiverCaps caps;
-      //连接信息
-      std::string format;
-      std::string colorspace;
-      std::string transfer_characteristics;
-    };
-    struct AudioReceiver
-    {
-      std::string id;
-      std::string name;
-      bool enable = false;
-      int channel_count;
-      int bit_depth;
-      int sample_rate;
-      double packet_time;
-      std::string ip;
-      std::string source_ip;
-      int port;
-      Redudancy redudancy;
-    };
-        struct AncillarySender
-    {
-      std::string id;
-      std::string sender_id;
-      std::string name;
-      std::string format;
-      std::string source_ip;
-      bool enable = false;
-      std::string ip;
-      int port;
-      Redudancy redudancy;
-    };
-    struct AncillaryReceiver
-    {
-      std::string id;
-      std::string name;
-      std::string format;
-      bool enable = false;
-      std::string ip;
-      std::string source_ip;
-      int port;
-      Redudancy redudancy;
-    };
-    struct RegistrationStatus
-    {
-      bool connected = false;
-      std::string uri;
-      std::string scheme;
-      std::string host;
-      int port = 0;
-      std::string version;
-    };
     class Node
     {
     private:
@@ -158,26 +47,21 @@ namespace seeder
       void remove_audio_receiver(std::string id);
       void remove_ancillary_receiver(std::string id);
 
-      void set_update_video_sender_callback(
-          std::function<void(const VideoSender &video)> func);
-      void set_update_audio_sender_callback(
-          std::function<void(const AudioSender &audio)> func);
-      void set_update_ancillary_sender_callback(
-          std::function<void(const AncillarySender &ancillary)> func);
-      void set_update_video_receiver_callback(
-          std::function<void(const VideoReceiver &video)> func);
-      void set_update_audio_receiver_callback(
-          std::function<void(const AudioReceiver &audio)> func);
-      void set_update_ancillary_receiver_callback(
-          std::function<void(const AncillaryReceiver &ancillary)> func);
-      void set_registration_changed_callback(
-          std::function<void(const RegistrationStatus &status)> func);
-      web::json::value effective_settings() const;
-      web::json::value persisted_settings() const;
-      web::json::value discover_registration_apis() const;
-      void write_persisted_settings(const web::json::value &settings);
-      void set_runtime_interfaces(
-          std::vector<web::hosts::experimental::host_interface> interfaces);
+      void set_update_video_sender_callback(VideoSenderCallback func);
+      void set_update_audio_sender_callback(AudioSenderCallback func);
+      void set_update_ancillary_sender_callback(AncillarySenderCallback func);
+      void set_update_video_receiver_callback(VideoReceiverCallback func);
+      void set_update_audio_receiver_callback(AudioReceiverCallback func);
+      void set_update_ancillary_receiver_callback(AncillaryReceiverCallback func);
+      void set_registration_changed_callback(RegistrationChangedCallback func);
+      void set_receiver_event_handler(ReceiverEventHandler handler);
+      void set_sender_event_handler(SenderEventHandler handler);
+      void set_registration_event_handler(RegistrationEventHandler handler);
+      NodeSettingsJson effective_settings() const;
+      NodeSettingsJson persisted_settings() const;
+      NodeSettingsJson discover_registration_apis() const;
+      void write_persisted_settings(const NodeSettingsJson &settings);
+      void set_runtime_interfaces(RuntimeInterfaces interfaces);
 
       void set_ptp_clock(std::string gmtid, bool locked, int ptp_domain = 127);
     };

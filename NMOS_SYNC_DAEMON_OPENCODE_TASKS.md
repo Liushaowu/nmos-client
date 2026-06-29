@@ -194,11 +194,11 @@ src/daemon/http_debug_server.cpp
 - `VideoReceiverDto`
 - `AudioReceiverDto`
 - `AncillaryReceiverDto`
-- `RedudancyDto`
+- `redundancyDto`
 
 **要求**
 - 字段尽量与 `node.h` 对齐
-- 保留 `redudancy` 拼写，不要改名
+- 保留 `redundancy` 拼写，不要改名
 - snapshot DTO 本体不需要 `revision` 字段
 - `revision` 只存在于 WebSocket 的 `snapshot.changed` 消息中，用于事件去重、debounce 和状态跟踪
 
@@ -544,7 +544,7 @@ WS 断开后自动重连。
   - ip
   - port
   - source_ip
-  - redudancy
+  - redundancy
 
 **完成定义**
 - video receiver 状态变化能成功回推到外部工程
@@ -718,7 +718,7 @@ WS 断开后自动重连。
    - daemon 重新全量拉取 snapshot
 5. snapshot 拉取的唯一触发源是 wsClient 收到的 `snapshot.changed`
 6. 外部工程必须在 WS 建连成功后主动发送一条 `snapshot.changed` 作为首次同步触发
-7. `redudancy` 字段拼写保持现状
+7. `redundancy` 字段拼写保持现状
 8. reconcile 必须做差异同步，不允许粗暴全删全建
 9. receiver callback 与 WS 转发解耦，不要在 NodeRuntime 里直接写网络逻辑
 10. 一旦与外部工程 WS 断链，必须删除当前已注册流，不能继续保留旧注册状态等待重连

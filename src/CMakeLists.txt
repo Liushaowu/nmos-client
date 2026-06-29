@@ -1,7 +1,27 @@
 find_package(nmos-cpp REQUIRED)
 
 set(NMOS_CLIENT_CORE_SOURCES
+    node_activation_auto_resolver.cpp
+    node_activation_connection.cpp
+    node_activation_registration.cpp
+    node_activation_transport.cpp
+    node_activation_transportfile.cpp
+    node_callback_dispatcher.cpp
+    node_connection_transport_params.cpp
+    node_event_bridge.cpp
     node_implementation.cpp
+    node_resource_controller.cpp
+    node_resource_factory.cpp
+    node_resource_factory_receivers.cpp
+    node_resource_factory_senders.cpp
+    node_resource_lifecycle.cpp
+    node_runtime_interface_updater.cpp
+    node_sdp_service.cpp
+    node_server_runtime.cpp
+    node_settings.cpp
+    node_stream_store.cpp
+    node_stream_store_ids.cpp
+    node_stream_store_receiver_ids.cpp
     node.cpp
     daemon/video_format.cpp)
 
@@ -9,7 +29,6 @@ set(NMOS_SYNC_DAEMON_SOURCES
     daemon/app.cpp
     daemon/config.cpp
     daemon/dto.cpp
-    daemon/node_runtime.cpp
     daemon/snapshot_client.cpp
     daemon/ws_client.cpp
     daemon/reconcile_engine.cpp

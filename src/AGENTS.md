@@ -3,22 +3,23 @@
 Scope: applies to `src/**` only. In conflicts, this file overrides root `AGENTS.md` for this subtree.
 
 ## OVERVIEW
-`src/` contains all hand-written C++ implementation for NMOS node runtime and public API.
+`src/` contains all hand-written C++ implementation for the NMOS node runtime and daemon-facing API surface.
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
 | Core lifecycle | `node.cpp` | Main orchestration, threading, NMOS callbacks |
-| Public API/contracts | `node.h` | Data models and `Node` method surface |
+| Facade/type surface | `node.h` and narrow `node_*` headers | `Node` entry plus internal data models |
 | Shared helpers | `node_implementation.h/.cpp` | ID generation, labels, group hints, port enums |
 | Build target wiring | `CMakeLists.txt` | Static library target and install/export rules |
 | Manual runtime example | `main.cpp` | Sample object wiring and callback registration |
 
 ## CONVENTIONS (LOCAL)
-- Preserve PImpl boundary: public declarations in `node.h`, heavy logic in `node.cpp`.
+- `node.h` is no longer protected as an immutable library public API; it may be split and simplified when all daemon call sites are updated.
+- Preserve the PImpl boundary by default: `Node` remains a lightweight facade and heavy logic lives in `node.cpp` or focused internal modules.
 - Keep sender/receiver operations symmetric across add/remove paths.
 - Reuse `impl::make_id`, `impl::set_label_description`, `impl::insert_group_hint` for consistency.
-- Keep naming and schema compatibility for `redudancy` fields (spelling is intentional in this codebase).
+- Use the correct `redundancy` spelling for redundancy fields and schema keys.
 
 ## ANTI-PATTERNS
 - Do not edit generated code assumptions into source paths (e.g., values copied from `build/`).

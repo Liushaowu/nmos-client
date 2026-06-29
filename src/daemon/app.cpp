@@ -143,29 +143,29 @@ App::App(std::string config_path) : config_path_(std::move(config_path)) {}
 App::~App() { stop(); }
 
 web::json::value App::node_settings_json() const {
-  if (!node_runtime_) {
+  if (!node_) {
     throw std::runtime_error("node runtime is not initialized");
   }
 
   std::lock_guard<std::mutex> lock(node_config_mutex_);
-  return node_runtime_->persisted_settings();
+  return node_->persisted_settings();
 }
 
 web::json::value App::available_registries_json() const {
-  if (!node_runtime_) {
+  if (!node_) {
     throw std::runtime_error("node runtime is not initialized");
   }
 
   std::lock_guard<std::mutex> lock(node_config_mutex_);
   web::json::value result = web::json::value::object();
   result[to_t("current")] = state_store_.status_json().at(to_t("registry"));
-  result[to_t("discovered")] = node_runtime_->discover_registration_apis();
+  result[to_t("discovered")] = node_->discover_registration_apis();
   return result;
 }
 
 web::json::value App::update_node_config(const web::json::value &patch,
                                          bool replace_entire_document) {
-  if (!node_runtime_) {
+  if (!node_) {
     throw std::runtime_error("node runtime is not initialized");
   }
   if (!patch.is_object()) {
@@ -173,17 +173,17 @@ web::json::value App::update_node_config(const web::json::value &patch,
   }
 
   std::lock_guard<std::mutex> lock(node_config_mutex_);
-  const auto previous_persisted = node_runtime_->persisted_settings();
+  const auto previous_persisted = node_->persisted_settings();
   auto next_persisted =
       replace_entire_document ? patch : merge_objects(previous_persisted, patch);
   apply_selected_registry_settings(next_persisted);
 
-  node_runtime_->write_persisted_settings(next_persisted);
+  node_->write_persisted_settings(next_persisted);
   try {
     restart_node_runtime();
   } catch (...) {
     try {
-      node_runtime_->write_persisted_settings(previous_persisted);
+      node_->write_persisted_settings(previous_persisted);
       restart_node_runtime();
     } catch (const std::exception &rollback_error) {
       std::cerr << "failed to roll back node config after restart failure: "
@@ -197,21 +197,21 @@ web::json::value App::update_node_config(const web::json::value &patch,
 
   web::json::value result = web::json::value::object();
   result[to_t("persisted")] = next_persisted;
-  result[to_t("effective")] = node_runtime_->effective_settings();
+  result[to_t("effective")] = node_->effective_settings();
   result[to_t("selected_registry")] = selected_registry_summary(next_persisted);
   return result;
 }
 
 void App::restart_node_runtime() {
-  if (!node_runtime_) {
+  if (!node_) {
     throw std::runtime_error("node runtime is not initialized");
   }
 
   set_node_state("restarting");
-  node_runtime_->stop();
+  node_->stop();
   state_store_.set_registry_status(nmos_node::RegistrationStatus{});
   state_store_.clear_last_snapshot();
-  if (!node_runtime_->start()) {
+  if (!node_->start()) {
     set_node_state("stopped");
     throw std::runtime_error("failed to restart node runtime with updated config");
   }
@@ -225,7 +225,7 @@ int App::run() {
   config_ = DaemonConfig::load_from_file(config_path_);
 
   state_store_.set_daemon_state("starting");
-  node_runtime_ = std::make_unique<NodeRuntime>(config_.node_config_path);
+  node_ = std::make_unique<nmos_node::Node>(config_.node_config_path);
   snapshot_client_ =
       std::make_unique<SnapshotClient>(config_.snapshot_url, config_.pull_timeout_ms);
   ws_client_ =
@@ -235,12 +235,12 @@ int App::run() {
   http_debug_server_ =
       std::make_unique<HttpDebugServer>(config_.debug_http_url, *this, state_store_);
 
-  node_runtime_->set_receiver_event_handler(
-      [this](const ReceiverEvent &event) { handle_receiver_event(event); });
-  node_runtime_->set_sender_event_handler(
-      [this](const SenderEvent &event) { handle_sender_event(event); });
-  node_runtime_->set_registration_event_handler(
-      [this](const RegistrationEvent &event)
+  node_->set_receiver_event_handler(
+      [this](const nmos_node::ReceiverEvent &event) { handle_receiver_event(event); });
+  node_->set_sender_event_handler(
+      [this](const nmos_node::SenderEvent &event) { handle_sender_event(event); });
+  node_->set_registration_event_handler(
+      [this](const nmos_node::RegistrationEvent &event)
       { handle_registration_event(event); });
 
   WsClientCallbacks callbacks;
@@ -262,7 +262,7 @@ int App::run() {
   ws_client_->set_callbacks(std::move(callbacks));
 
   set_node_state("starting");
-  if (!node_runtime_->start()) {
+  if (!node_->start()) {
     state_store_.mark_sync_failed("failed to start node runtime");
     set_node_state("stopped");
     return 1;
@@ -325,10 +325,10 @@ void App::stop() {
     http_debug_server_->stop();
     log_elapsed("debug http server stopped");
   }
-  if (node_runtime_) {
+  if (node_) {
     log_elapsed("stopping node runtime");
     set_node_state("stopping");
-    node_runtime_->stop();
+    node_->stop();
     set_node_state("stopped");
     log_elapsed("node runtime stopped");
   }
@@ -410,7 +410,7 @@ void App::perform_sync(std::int64_t revision, bool is_retry_attempt) {
   try {
     const auto current_snapshot = state_store_.last_snapshot();
     auto snapshot = snapshot_client_->fetch_snapshot();
-    reconcile_engine_.apply_snapshot(current_snapshot, snapshot, *node_runtime_);
+    reconcile_engine_.apply_snapshot(current_snapshot, snapshot, *node_);
     state_store_.mark_apply_success(revision, snapshot, snapshot.has_any_streams());
     state_store_.set_daemon_state("running");
     if (is_retry_attempt) {
@@ -456,7 +456,7 @@ void App::handle_ws_connected() {
 void App::handle_ws_disconnected() {
   state_store_.set_daemon_state("draining");
   std::lock_guard<std::mutex> reconcile_lock(reconcile_mutex_);
-  reconcile_engine_.drain_all(state_store_.last_snapshot(), *node_runtime_);
+  reconcile_engine_.drain_all(state_store_.last_snapshot(), *node_);
   state_store_.mark_drained_due_to_ws_disconnect();
   state_store_.clear_last_snapshot();
   state_store_.set_daemon_state("degraded");
@@ -466,7 +466,7 @@ void App::handle_ws_error(const std::string &message) {
   state_store_.mark_sync_failed(message);
 }
 
-void App::handle_sender_event(const SenderEvent &event) {
+void App::handle_sender_event(const nmos_node::SenderEvent &event) {
   if (!ws_client_ || !ws_client_->is_connected()) {
     return;
   }
@@ -488,7 +488,7 @@ void App::handle_sender_event(const SenderEvent &event) {
       event.payload);
 }
 
-void App::handle_receiver_event(const ReceiverEvent &event) {
+void App::handle_receiver_event(const nmos_node::ReceiverEvent &event) {
   if (!ws_client_ || !ws_client_->is_connected()) {
     return;
   }
@@ -510,7 +510,7 @@ void App::handle_receiver_event(const ReceiverEvent &event) {
       event.payload);
 }
 
-void App::handle_registration_event(const RegistrationEvent &event) {
+void App::handle_registration_event(const nmos_node::RegistrationEvent &event) {
   state_store_.set_registry_status(event.status);
 }
 

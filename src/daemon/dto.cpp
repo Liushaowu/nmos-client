@@ -1,4 +1,4 @@
-#include "../node.h"
+#include "../node_types.h"
 #include "dto.h"
 
 #include <cpprest/details/basic_types.h>
@@ -385,7 +385,7 @@ namespace
     return array;
   }
 
-  seeder::nmos_node::Redudancy redudancy_from_json(
+  seeder::nmos_node::Redundancy redundancy_from_json(
       const value &object, const std::string &path)
   {
     if (!object.is_object())
@@ -393,22 +393,22 @@ namespace
       throw invalid_field_error(path, "object", "not an object");
     }
 
-    seeder::nmos_node::Redudancy redudancy;
-    redudancy.present = true;
-    redudancy.enable = get_bool_or(object, "enable", false, path);
-    redudancy.source_ip = get_string_or(object, "source_ip", {}, path);
-    redudancy.ip = get_string_or(object, "ip", {}, path);
-    redudancy.port = get_int_or(object, "port", 0, path);
-    return redudancy;
+    seeder::nmos_node::Redundancy redundancy;
+    redundancy.present = true;
+    redundancy.enable = get_bool_or(object, "enable", false, path);
+    redundancy.source_ip = get_string_or(object, "source_ip", {}, path);
+    redundancy.ip = get_string_or(object, "ip", {}, path);
+    redundancy.port = get_int_or(object, "port", 0, path);
+    return redundancy;
   }
 
-  value redudancy_to_json(const seeder::nmos_node::Redudancy &redudancy)
+  value redundancy_to_json(const seeder::nmos_node::Redundancy &redundancy)
   {
     value object = value::object();
-    object[to_t("enable")] = value::boolean(redudancy.enable);
-    object[to_t("source_ip")] = json_string(redudancy.source_ip);
-    object[to_t("ip")] = json_string(redudancy.ip);
-    object[to_t("port")] = value::number(redudancy.port);
+    object[to_t("enable")] = value::boolean(redundancy.enable);
+    object[to_t("source_ip")] = json_string(redundancy.source_ip);
+    object[to_t("ip")] = json_string(redundancy.ip);
+    object[to_t("port")] = value::number(redundancy.port);
     return object;
   }
 
@@ -428,10 +428,10 @@ namespace
     sender.ip = get_string_or(object, "ip", {}, path);
     sender.port = get_int_or(object, "port", 0, path);
     sender.pg_format = get_int_or(object, "pg_format", 0, path);
-    if (object.has_field(to_t("redudancy")))
+    if (object.has_field(to_t("redundancy")))
     {
-      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
-                                             field_path(path, "redudancy"));
+      sender.redundancy = redundancy_from_json(object.at(to_t("redundancy")),
+                                             field_path(path, "redundancy"));
     }
     return sender;
   }
@@ -450,9 +450,9 @@ namespace
     object[to_t("source_ip")] = json_string(sender.source_ip);
     object[to_t("ip")] = json_string(sender.ip);
     object[to_t("port")] = value::number(sender.port);
-    if (sender.redudancy.present)
+    if (sender.redundancy.present)
     {
-      object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+      object[to_t("redundancy")] = redundancy_to_json(sender.redundancy);
     }
     object[to_t("pg_format")] = value::number(sender.pg_format);
     return object;
@@ -471,10 +471,10 @@ namespace
     sender.source_ip = get_string_or(object, "source_ip", {}, path);
     sender.ip = get_string_or(object, "ip", {}, path);
     sender.port = get_int_or(object, "port", 0, path);
-    if (object.has_field(to_t("redudancy")))
+    if (object.has_field(to_t("redundancy")))
     {
-      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
-                                             field_path(path, "redudancy"));
+      sender.redundancy = redundancy_from_json(object.at(to_t("redundancy")),
+                                             field_path(path, "redundancy"));
     }
     return sender;
   }
@@ -492,9 +492,9 @@ namespace
     object[to_t("source_ip")] = json_string(sender.source_ip);
     object[to_t("ip")] = json_string(sender.ip);
     object[to_t("port")] = value::number(sender.port);
-    if (sender.redudancy.present)
+    if (sender.redundancy.present)
     {
-      object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+      object[to_t("redundancy")] = redundancy_to_json(sender.redundancy);
     }
     return object;
   }
@@ -510,10 +510,10 @@ namespace
     sender.source_ip = get_string_or(object, "source_ip", {}, path);
     sender.ip = get_string_or(object, "ip", {}, path);
     sender.port = get_int_or(object, "port", 0, path);
-    if (object.has_field(to_t("redudancy")))
+    if (object.has_field(to_t("redundancy")))
     {
-      sender.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
-                                             field_path(path, "redudancy"));
+      sender.redundancy = redundancy_from_json(object.at(to_t("redundancy")),
+                                             field_path(path, "redundancy"));
     }
     return sender;
   }
@@ -531,9 +531,9 @@ namespace
     object[to_t("source_ip")] = json_string(sender.source_ip);
     object[to_t("ip")] = json_string(sender.ip);
     object[to_t("port")] = value::number(sender.port);
-    if (sender.redudancy.present)
+    if (sender.redundancy.present)
     {
-      object[to_t("redudancy")] = redudancy_to_json(sender.redudancy);
+      object[to_t("redundancy")] = redundancy_to_json(sender.redundancy);
     }
     return object;
   }
@@ -548,15 +548,15 @@ namespace
     receiver.source_ip = get_string_or(object, "source_ip", {}, path);
     receiver.ip = get_string_or(object, "ip", {}, path);
     receiver.port = get_int_or(object, "port", 0, path);
-    if (object.has_field(to_t("redudancy")))
+    if (object.has_field(to_t("redundancy")))
     {
-      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
-                                               field_path(path, "redudancy"));
+      receiver.redundancy = redundancy_from_json(object.at(to_t("redundancy")),
+                                               field_path(path, "redundancy"));
     }
     else
     {
-      receiver.redudancy.enable =
-          get_bool_or(object, "redudancy_enable", false, path);
+      receiver.redundancy.enable =
+          get_bool_or(object, "redundancy_enable", false, path);
     }
     if (object.has_field(to_t("caps")) && object.at(to_t("caps")).is_object())
     {
@@ -584,9 +584,9 @@ namespace
     object[to_t("source_ip")] = json_string(receiver.source_ip);
     object[to_t("ip")] = json_string(receiver.ip);
     object[to_t("port")] = value::number(receiver.port);
-    if (receiver.redudancy.present)
+    if (receiver.redundancy.present)
     {
-      object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
+      object[to_t("redundancy")] = redundancy_to_json(receiver.redundancy);
     }
     if (!receiver.caps.formats.empty() || !receiver.caps.colorspaces.empty() ||
         !receiver.caps.transfer_characteristics.empty())
@@ -620,10 +620,10 @@ namespace
     receiver.source_ip = get_string_or(object, "source_ip", {}, path);
     receiver.ip = get_string_or(object, "ip", {}, path);
     receiver.port = get_int_or(object, "port", 0, path);
-    if (object.has_field(to_t("redudancy")))
+    if (object.has_field(to_t("redundancy")))
     {
-      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
-                                               field_path(path, "redudancy"));
+      receiver.redundancy = redundancy_from_json(object.at(to_t("redundancy")),
+                                               field_path(path, "redundancy"));
     }
     return receiver;
   }
@@ -641,9 +641,9 @@ namespace
     object[to_t("source_ip")] = json_string(receiver.source_ip);
     object[to_t("ip")] = json_string(receiver.ip);
     object[to_t("port")] = value::number(receiver.port);
-    if (receiver.redudancy.present)
+    if (receiver.redundancy.present)
     {
-      object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
+      object[to_t("redundancy")] = redundancy_to_json(receiver.redundancy);
     }
     return object;
   }
@@ -659,10 +659,10 @@ namespace
     receiver.source_ip = get_string_or(object, "source_ip", {}, path);
     receiver.ip = get_string_or(object, "ip", {}, path);
     receiver.port = get_int_or(object, "port", 0, path);
-    if (object.has_field(to_t("redudancy")))
+    if (object.has_field(to_t("redundancy")))
     {
-      receiver.redudancy = redudancy_from_json(object.at(to_t("redudancy")),
-                                               field_path(path, "redudancy"));
+      receiver.redundancy = redundancy_from_json(object.at(to_t("redundancy")),
+                                               field_path(path, "redundancy"));
     }
     return receiver;
   }
@@ -678,9 +678,9 @@ namespace
     object[to_t("source_ip")] = json_string(receiver.source_ip);
     object[to_t("ip")] = json_string(receiver.ip);
     object[to_t("port")] = value::number(receiver.port);
-    if (receiver.redudancy.present)
+    if (receiver.redundancy.present)
     {
-      object[to_t("redudancy")] = redudancy_to_json(receiver.redudancy);
+      object[to_t("redundancy")] = redundancy_to_json(receiver.redundancy);
     }
     return object;
   }
@@ -968,8 +968,8 @@ namespace seeder::nmos_sync
                                  ancillary_receiver_to_json);
   }
 
-  bool equivalent(const nmos_node::Redudancy &lhs,
-                  const nmos_node::Redudancy &rhs)
+  bool equivalent(const nmos_node::Redundancy &lhs,
+                 const nmos_node::Redundancy &rhs)
   {
     return lhs.present == rhs.present && lhs.enable == rhs.enable &&
            lhs.source_ip == rhs.source_ip && lhs.ip == rhs.ip &&
@@ -985,7 +985,7 @@ namespace seeder::nmos_sync
            lhs.transfer_characteristics == rhs.transfer_characteristics &&
            lhs.source_ip == rhs.source_ip &&
            lhs.ip == rhs.ip && lhs.port == rhs.port &&
-           equivalent(lhs.redudancy, rhs.redudancy) &&
+           equivalent(lhs.redundancy, rhs.redundancy) &&
            lhs.pg_format == rhs.pg_format;
   }
 
@@ -997,7 +997,7 @@ namespace seeder::nmos_sync
            lhs.enable == rhs.enable && lhs.channel_count == rhs.channel_count &&
            lhs.bit_depth == rhs.bit_depth && lhs.sample_rate == rhs.sample_rate &&
            lhs.ip == rhs.ip && lhs.port == rhs.port &&
-           equivalent(lhs.redudancy, rhs.redudancy);
+           equivalent(lhs.redundancy, rhs.redundancy);
   }
 
   bool equivalent(const nmos_node::AncillarySender &lhs,
@@ -1007,7 +1007,7 @@ namespace seeder::nmos_sync
            lhs.name == rhs.name && lhs.source_ip == rhs.source_ip &&
            lhs.format == rhs.format && lhs.enable == rhs.enable &&
            lhs.ip == rhs.ip && lhs.port == rhs.port &&
-           equivalent(lhs.redudancy, rhs.redudancy);
+           equivalent(lhs.redundancy, rhs.redundancy);
   }
 
   bool equivalent(const nmos_node::VideoReceiver &lhs,
@@ -1017,7 +1017,7 @@ namespace seeder::nmos_sync
            lhs.enable == rhs.enable &&
            lhs.source_ip == rhs.source_ip && lhs.ip == rhs.ip &&
            lhs.port == rhs.port &&
-           equivalent(lhs.redudancy, rhs.redudancy) &&
+           equivalent(lhs.redundancy, rhs.redundancy) &&
            lhs.format == rhs.format &&
            lhs.colorspace == rhs.colorspace &&
            lhs.transfer_characteristics == rhs.transfer_characteristics &&
@@ -1036,7 +1036,7 @@ namespace seeder::nmos_sync
            lhs.bit_depth == rhs.bit_depth && lhs.sample_rate == rhs.sample_rate &&
            lhs.packet_time == rhs.packet_time && lhs.ip == rhs.ip &&
            lhs.source_ip == rhs.source_ip && lhs.port == rhs.port &&
-           equivalent(lhs.redudancy, rhs.redudancy);
+           equivalent(lhs.redundancy, rhs.redundancy);
   }
 
   bool equivalent(const nmos_node::AncillaryReceiver &lhs,
@@ -1046,7 +1046,7 @@ namespace seeder::nmos_sync
            lhs.name == rhs.name && lhs.format == rhs.format &&
            lhs.enable == rhs.enable && lhs.ip == rhs.ip &&
            lhs.source_ip == rhs.source_ip && lhs.port == rhs.port &&
-           equivalent(lhs.redudancy, rhs.redudancy);
+           equivalent(lhs.redundancy, rhs.redundancy);
   }
 
   bool equivalent(const PtpClockDto &lhs, const PtpClockDto &rhs)

@@ -30,7 +30,7 @@ Use this section as the first 1-2 minute onboarding pass in a new session.
 - Do not assume a runnable `nmos-client` executable exists by default.
 - Do not treat `build/` outputs as source-of-truth.
 - Do not break sender/receiver add/remove symmetry when changing resource lifecycle logic.
-- Keep the `redudancy` field spelling unchanged for compatibility with existing code paths.
+- Keep the `redundancy` field spelling unchanged for compatibility with existing code paths.
 
 ## STRUCTURE
 ```text

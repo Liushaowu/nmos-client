@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../node_types.h"
 #include "dto.h"
 
 #include <mutex>
@@ -19,15 +20,6 @@ struct StatusSnapshot {
   bool has_received_snapshot_changed{false};
 };
 
-struct RegistrySnapshot {
-  bool connected{false};
-  std::string uri;
-  std::string scheme;
-  std::string host;
-  int port{0};
-  std::string version;
-};
-
 class StateStore {
 public:
   void set_daemon_state(const std::string &state);
@@ -44,7 +36,7 @@ public:
   void set_registry_status(const nmos_node::RegistrationStatus &status);
 
   StatusSnapshot status() const;
-  RegistrySnapshot registry_status() const;
+  nmos_node::RegistrationStatus registry_status() const;
   std::optional<SnapshotDto> last_snapshot() const;
   web::json::value status_json() const;
   web::json::value snapshot_json() const;
@@ -54,7 +46,7 @@ public:
 private:
   mutable std::mutex mutex_;
   StatusSnapshot status_;
-  RegistrySnapshot registry_status_;
+  nmos_node::RegistrationStatus registry_status_;
   std::optional<SnapshotDto> last_snapshot_;
   bool pending_drain_notification_{false};
 };

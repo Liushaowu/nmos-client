@@ -1,7 +1,7 @@
 #pragma once
 
+#include "../node.h"
 #include "config.h"
-#include "node_runtime.h"
 #include "reconcile_engine.h"
 #include "snapshot_client.h"
 #include "state_store.h"
@@ -40,9 +40,9 @@ private:
   void handle_ws_connected();
   void handle_ws_disconnected();
   void handle_ws_error(const std::string &message);
-  void handle_sender_event(const SenderEvent &event);
-  void handle_receiver_event(const ReceiverEvent &event);
-  void handle_registration_event(const RegistrationEvent &event);
+  void handle_sender_event(const nmos_node::SenderEvent &event);
+  void handle_receiver_event(const nmos_node::ReceiverEvent &event);
+  void handle_registration_event(const nmos_node::RegistrationEvent &event);
   void set_node_state(const std::string &state);
 
   std::string config_path_;
@@ -52,7 +52,7 @@ private:
 
   DaemonConfig config_;
   StateStore state_store_;
-  std::unique_ptr<NodeRuntime> node_runtime_;
+  std::unique_ptr<nmos_node::Node> node_;
   std::unique_ptr<SnapshotClient> snapshot_client_;
   std::unique_ptr<WsClient> ws_client_;
   std::unique_ptr<HttpDebugServer> http_debug_server_;

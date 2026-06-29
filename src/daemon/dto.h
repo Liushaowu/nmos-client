@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../node.h"
+#include "../node_types.h"
 
 #include <cstdint>
 #include <optional>
@@ -115,8 +115,8 @@ web::json::value make_receiver_audio_observed_changed_message(
 web::json::value make_receiver_ancillary_observed_changed_message(
     const nmos_node::AncillaryReceiver &receiver);
 
-bool equivalent(const nmos_node::Redudancy &lhs,
-                const nmos_node::Redudancy &rhs);
+bool equivalent(const nmos_node::Redundancy &lhs,
+               const nmos_node::Redundancy &rhs);
 bool equivalent(const nmos_node::VideoSender &lhs,
                 const nmos_node::VideoSender &rhs);
 bool equivalent(const nmos_node::AudioSender &lhs,
