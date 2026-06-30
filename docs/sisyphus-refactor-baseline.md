@@ -536,3 +536,188 @@ No CTest, smoke-test execution, runtime launch, or LSP diagnostic was run for Ph
 Net result: **-157 lines** across the codebase. `NodeRuntime` class deleted, event types and handlers moved into `Node`. `StateStore` now uses `nmos_node::RegistrationStatus` directly.
 
 Build: `cmake --workflow --preset debug` → `[100%] Built target nmos-sync-daemon`.
+
+## Build-Validated Continuation: Event, Resource, and Runtime Interface Extraction
+
+The next continuation followed the plan's Phase 5, Phase 4, and Phase 3 boundaries by moving more remaining `Node::Impl` responsibilities into focused internal modules while preserving the `Node` PImpl facade.
+
+Completed slices:
+
+* Added `src/node_event_bridge.h` and `src/node_event_bridge.cpp` for event-handler bridge state and callback wiring. `Node::Impl` no longer owns receiver, sender, registration event handlers, or the event callback mutex directly.
+* Added `src/node_resource_controller.h` and `src/node_resource_controller.cpp` for sender/receiver add, remove, update, resource replacement, stream-store lookup, and resource lifecycle orchestration. `Node::Impl` now delegates resource lifecycle methods to `NodeResourceController`.
+* Added `src/node_runtime_interface_updater.h` and `src/node_runtime_interface_updater.cpp` for `set_runtime_interfaces()` reconciliation. Runtime interface changes now refresh sender/receiver resources and transport files through this updater.
+* `src/CMakeLists.txt` includes the three new implementation files.
+* `src/node.cpp` is reduced to startup/lifecycle coordination, settings/PTP/runtime facade wrappers, thin resource/event/updater delegation, and public `Node` PImpl forwarding.
+
+Current line counts after this continuation:
+
+```text
+1106 src/node.cpp
+ 141 src/node_event_bridge.cpp
+ 926 src/node_resource_controller.cpp
+ 108 src/node_runtime_interface_updater.cpp
+```
+
+Validation command:
+
+```bash
+cmake --workflow --preset debug
+```
+
+Validation result:
+
+* Configure completed.
+* Build completed: `[100%] Built target nmos-sync-daemon`.
+* Package completed: `build/debug/nmos-daemon_1.0.0_amd64.deb` was generated.
+* Remaining warnings are CMake developer warnings about `CMP0167` / removed `FindBoost`.
+
+No CTest, smoke-test execution, runtime launch, or LSP diagnostic was run for this continuation.
+
+## Breaking Cleanup: Redundancy Type Spelling
+
+The redundancy model type now uses the correct C++ type spelling while preserving the JSON schema key and field spelling:
+
+* `src/node_types.h` defines `nmos_node::Redundancy`.
+* Sender and receiver models use `Redundancy redundancy`.
+* Daemon DTO parsing and serialization continue to read and write the JSON key `redundancy`.
+* Project guidance and refactor docs no longer describe the old misspelling as intentional.
+
+Consistency checks performed:
+
+```bash
+rg -n "<old misspellings and lowercase type spelling>" src docs
+git diff --check
+cmake --workflow --preset debug
+```
+
+Validation result:
+
+* No old misspelling or old lowercase type spelling remained in `src` or `docs`.
+* Whitespace diff check passed.
+* Build completed: `[100%] Built target nmos-sync-daemon`.
+* Package completed: `build/debug/nmos-daemon_1.0.0_amd64.deb` was generated.
+
+## Build-Validated Continuation: PTP Clock Updater Extraction
+
+The next Phase 7 cleanup slice moved PTP clock update details out of `Node::Impl` without changing the public facade method:
+
+* Added `src/node_ptp_clock_updater.h` and `src/node_ptp_clock_updater.cpp`.
+* Moved PTP GMID normalization and validation from `src/node.cpp` into the new updater implementation.
+* Moved `set_ptp_clock()` node clock mutation and sender transportfile refresh into `NodePtpClockUpdater`.
+* `Node::Impl::set_ptp_clock()` is now a thin delegate to `ptp_clock_updater_`.
+* `src/CMakeLists.txt` includes `node_ptp_clock_updater.cpp` in `NMOS_CLIENT_CORE_SOURCES`.
+
+Current line counts after this slice:
+
+ ```text
+ 1010 src/node.cpp
+  41 src/node_ptp_clock_updater.h
+ 142 src/node_ptp_clock_updater.cpp
+ ```
+
+Validation command:
+
+```bash
+cmake --workflow --preset debug
+```
+
+Validation result:
+
+* Configure completed.
+* Build completed: `[100%] Built target nmos-sync-daemon`.
+* Package completed: `build/debug/nmos-daemon_1.0.0_amd64.deb` was generated.
+* Remaining warnings are CMake developer warnings about `CMP0167` / removed `FindBoost`.
+
+LSP diagnostics were attempted for `src/node.cpp`, `src/node_ptp_clock_updater.h`, and `src/node_ptp_clock_updater.cpp`, but the language-server connection was unavailable (`MCP error -32000: Connection closed` / `Not connected`).
+
+## Build-Validated Continuation: Lifecycle Controller Extraction
+
+The next Phase 3 cleanup slice moved `Node::Impl` start/stop lifecycle glue into a focused controller while preserving the public `Node` facade and the existing `NodeServerRuntime` server-start path:
+
+* Added `src/node_lifecycle_controller.h` and `src/node_lifecycle_controller.cpp`.
+* Moved `Node::Impl::start()` and `Node::Impl::stop()` orchestration into `NodeLifecycleController`.
+* `Node::Impl::start()` and `Node::Impl::stop()` are now thin delegates to `lifecycle_controller_`.
+* `NodeLifecycleController` receives callbacks for `reset_model_state()` and `nmos_node_start()` so the new module does not need to know `Node::Impl`.
+* `thread_run()`, `node_implementation_run()`, `init()`, and `nmos_node_start()` remain in `Node::Impl` for this slice.
+* `src/CMakeLists.txt` includes `node_lifecycle_controller.cpp` in `NMOS_CLIENT_CORE_SOURCES`.
+
+Current line counts after this slice:
+
+```text
+ 902 src/node.cpp
+  53 src/node_lifecycle_controller.h
+ 154 src/node_lifecycle_controller.cpp
+```
+
+Validation command:
+
+```bash
+cmake --workflow --preset debug
+```
+
+Validation result:
+
+* Configure completed.
+* Build completed: `[100%] Built target nmos-sync-daemon`.
+* Package completed: `build/debug/nmos-daemon_1.0.0_amd64.deb` was generated.
+* Remaining warnings are CMake developer warnings about `CMP0167` / removed `FindBoost`.
+
+## Phase 8 Closeout Preparation: CTest Smoke Wiring
+
+The Phase 8 scaffold is no longer documentation-only:
+
+* Root CMake now includes `CTest` and adds the `tests/` subtree when `BUILD_TESTING` is enabled.
+* Added `tests/CMakeLists.txt` with a narrow `refactor_seams_smoke` executable and matching `add_test()` entry.
+* The smoke target reuses the same `nmos-cpp::compile-settings` and `nmos-cpp::nmos-cpp` link targets as `nmos-sync-daemon`.
+* Production target wiring, install rules, and CPack package settings remain unchanged.
+* `tests/refactor_seams_smoke.cpp` now uses the current `connection_transport_params` seam instead of the retired `NodeConnectionHandlers` spelling.
+* `tests/README.md` now documents the CMake/CTest verification path:
+
+```bash
+cmake --workflow --preset debug
+ctest --test-dir build/debug --output-on-failure
+```
+
+Closeout validation commands:
+
+```bash
+cmake --workflow --preset debug
+ctest --test-dir build/debug --output-on-failure
+```
+
+Validation result:
+
+* Configure completed.
+* Build completed: `[100%] Built target refactor_seams_smoke` and `nmos-sync-daemon` remained built.
+* Package completed: `build/debug/nmos-daemon_1.0.0_amd64.deb` was generated.
+* CTest ran `refactor_seams_smoke` successfully: `100% tests passed, 0 tests failed out of 1`.
+* Existing CMake developer warnings about `CMP0167` / removed `FindBoost` remained non-blocking.
+* LSP diagnostics remain unavailable in this environment (`MCP error -32000: Connection closed`) and are not treated as authoritative validation.
+
+## Phase 9 Final Review
+
+Final `review-work` was run across the completed refactor closeout:
+
+* Goal and constraint verification: PASS.
+* Hands-on QA execution: PASS.
+* Code quality review: PASS.
+* Security review: PASS, with a non-blocking note that the `gate_` null-dereference risk in the PTP logging path is pre-existing and not introduced by this refactor.
+* Context mining: initially FAIL because root `AGENTS.md` still contained stale static-library/no-test-target guidance.
+
+The context-mining blocker was fixed by updating root `AGENTS.md` to describe the current `nmos-sync-daemon` executable target, the `refactor_seams_smoke` CTest target, and the current build/test commands. The context-mining lane was then re-run and returned PASS.
+
+Final validation after the review fix:
+
+```bash
+git diff --check
+cmake --workflow --preset debug
+ctest --test-dir build/debug --output-on-failure
+```
+
+Final validation result:
+
+* Whitespace diff check passed.
+* Build completed: `[100%] Built target refactor_seams_smoke` and `[100%] Built target nmos-sync-daemon`.
+* Package completed: `build/debug/nmos-daemon_1.0.0_amd64.deb` was generated.
+* CTest ran `refactor_seams_smoke` successfully: `100% tests passed, 0 tests failed out of 1`.
+* Existing CMake developer warnings about `CMP0167` / removed `FindBoost` remained non-blocking.

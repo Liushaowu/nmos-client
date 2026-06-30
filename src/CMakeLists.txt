@@ -10,6 +10,8 @@ set(NMOS_CLIENT_CORE_SOURCES
     node_connection_transport_params.cpp
     node_event_bridge.cpp
     node_implementation.cpp
+    node_lifecycle_controller.cpp
+    node_ptp_clock_updater.cpp
     node_resource_controller.cpp
     node_resource_factory.cpp
     node_resource_factory_receivers.cpp

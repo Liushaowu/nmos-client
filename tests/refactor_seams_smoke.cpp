@@ -1,5 +1,5 @@
 #include "node_callback_dispatcher.h"
-#include "node_connection_handlers.h"
+#include "node_connection_transport_params.h"
 #include "node_sdp_service.h"
 #include "node_server_runtime.h"
 #include "node_stream_store.h"
@@ -86,33 +86,32 @@ namespace
 
   void check_connection_handler_helpers()
   {
-    using TransportParamsState =
-        internal::NodeConnectionHandlers::TransportParamsState;
+    using TransportParamsState = internal::connection_transport_params::State;
 
     auto endpoint = web::json::value::object();
     endpoint[nmos::fields::transport_params] = web::json::value::array(1);
-    assert(internal::NodeConnectionHandlers::active_leg_count_matches(
+    assert(internal::connection_transport_params::active_leg_count_matches(
         endpoint, false));
-    assert(!internal::NodeConnectionHandlers::active_leg_count_matches(
+    assert(!internal::connection_transport_params::active_leg_count_matches(
         endpoint, true));
 
     const auto &transport_params = endpoint.at(nmos::fields::transport_params);
-    assert(internal::NodeConnectionHandlers::is_transport_params_array(
+    assert(internal::connection_transport_params::is_array(
         transport_params));
-    assert(!internal::NodeConnectionHandlers::is_transport_params_empty(
+    assert(!internal::connection_transport_params::is_empty(
         transport_params));
     assert(TransportParamsState::ready ==
-           internal::NodeConnectionHandlers::transport_params_state(
+           internal::connection_transport_params::state(
                transport_params));
 
     const auto empty_transport_params = web::json::value::array();
     assert(TransportParamsState::empty ==
-           internal::NodeConnectionHandlers::transport_params_state(
+           internal::connection_transport_params::state(
                empty_transport_params));
 
     const auto invalid_transport_params = web::json::value::object();
     assert(TransportParamsState::not_array ==
-           internal::NodeConnectionHandlers::transport_params_state(
+           internal::connection_transport_params::state(
                invalid_transport_params));
   }
 

@@ -11,7 +11,7 @@ This repository is a CMake-based C++ NMOS client library. Core logic is concentr
 Use this section as the first 1-2 minute onboarding pass in a new session.
 
 - **Product role**: This project is a control-plane NMOS node wrapper library on top of `nmos-cpp`, not a media data-plane engine.
-- **Build artifact**: Default target is static library `nmos-client`; executable wiring in `src/CMakeLists.txt` is currently commented out.
+- **Build artifact**: Active target is the `nmos-sync-daemon` executable; CPack generates the daemon `.deb` package.
 - **Public API entry**: `src/node.h` exposes `Node` plus `VideoSender`/`AudioSender`/`VideoReceiver`/`AudioReceiver` models.
 - **Runtime startup chain**: `Node::start` -> `Node::Impl::start` -> `nmos_node_start` in `src/node.cpp`.
 - **Core resource pattern**:
@@ -37,7 +37,7 @@ Use this section as the first 1-2 minute onboarding pass in a new session.
 ./
 ├── CMakeLists.txt          # Root build orchestration
 ├── node_config_dev.json    # Runtime NMOS node settings sample
-├── src/                    # Hand-written source of nmos-client library
+├── src/                    # Hand-written source for the NMOS daemon/runtime
 ├── build/                  # Generated artifacts (CMake cache, .a, .deb)
 └── .vscode/                # Local debug configuration
 ```
@@ -46,7 +46,8 @@ Use this section as the first 1-2 minute onboarding pass in a new session.
 | Task | Location | Notes |
 |------|----------|-------|
 | Build entry | `CMakeLists.txt` | Delegates all targets to `src/` |
-| Library target | `src/CMakeLists.txt` | `nmos-client` static library definition |
+| Executable target | `src/CMakeLists.txt` | `nmos-sync-daemon` executable definition |
+| Smoke test target | `tests/CMakeLists.txt` | `refactor_seams_smoke` CTest wiring |
 | Runtime startup chain | `src/node.cpp` | `Node::start` → `Impl::start` → `nmos_node_start` |
 | Public API surface | `src/node.h` | `Node` + sender/receiver data models |
 | Runtime sample wiring | `src/main.cpp` | Example object setup and API calls |
@@ -66,14 +67,14 @@ Implementation-level details are maintained in `src/AGENTS.md`; this map stays r
 
 ## CONVENTIONS
 - Root `CMakeLists.txt` hard-sets `CMAKE_BUILD_TYPE Debug` instead of relying on caller flags.
-- Default active target is static library (`add_library`); executable block in `src/CMakeLists.txt` is commented out.
+- Active target is the `nmos-sync-daemon` executable; the earlier static-library-only shape is historical.
 - Runtime sample currently uses an absolute config path in `src/main.cpp`; repository config file lives at root (`node_config_dev.json`).
 - `build/` is ignored by git and treated as generated-only; do not encode source-of-truth rules there.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do not treat `build/`, `build_initdeep/`, or `.cache/` content as editable source-of-truth.
 - Do not rely on stale CMake cache generated from another source path; configure a fresh build directory.
-- Do not assume executable `nmos-client` exists by default; current active target is the static library.
+- Do not assume executable `nmos-client` exists by default; current active target is `nmos-sync-daemon`.
 
 ## UNIQUE STYLES
 - PImpl style: public `Node` in header, heavy logic in `Node::Impl` inside `src/node.cpp`.
@@ -84,11 +85,12 @@ Implementation-level details are maintained in `src/AGENTS.md`; this map stays r
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --workflow --preset debug
+ctest --test-dir build/debug --output-on-failure
 cmake --install build
 ```
 
 ## NOTES
-- No repository-defined test target found (`enable_testing`/`add_test` absent).
-- `.vscode/launch.json` expects `build/src/nmos-client`, but executable target is currently commented in `src/CMakeLists.txt`.
+- CTest is wired for the refactor seam smoke test: `refactor_seams_smoke`.
+- `.vscode/launch.json` may still reference older `nmos-client` paths; current executable target is `nmos-sync-daemon`.
 - Deep directory complexity is mostly generated CMake layers under `build/`, not source-domain complexity.
 - Source-implementation constraints (resource symmetry, field compatibility, audio sender hotspot) are defined in `src/AGENTS.md`.

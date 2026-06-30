@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.12)
 project(nmos-client)
 set(CMAKE_BUILD_TYPE Debug)
+include(CTest)
 add_subdirectory(src)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
 
 set(CPACK_GENERATOR "DEB")
 set(CPACK_PACKAGE_NAME "nmos-daemon")
