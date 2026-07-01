@@ -3,6 +3,7 @@
 #include "node_implementation.h"
 #include "node_sdp_service.h"
 
+#include <cpprest/details/basic_types.h>
 #include <nmos/json_fields.h>
 #include <nmos/type.h>
 #include <slog/all_in_one.h>
@@ -47,7 +48,8 @@ namespace seeder::nmos_node::internal
       const bool stream_enable = master_enable &&
                                  NodeSdpService::transport_param_rtp_enabled(
                                      transport_params.at(0), false);
-      std::string connection_resource_json = connection_resource.data.serialize();
+      std::string connection_resource_json =
+          utility::conversions::to_utf8string(connection_resource.data.serialize());
       std::error_code ec{};
       std::string json;
       const bool has_secondary_transport_param = transport_params.size() > 1;
@@ -56,12 +58,12 @@ namespace seeder::nmos_node::internal
         const auto &transport_file = nmos::fields::transport_file(endpoint_active);
         int dest_port =
             nmos::fields::destination_port(transport_params.at(0)).as_integer();
-        std::string interface_ip =
-            nmos::fields::interface_ip(transport_params.at(0)).as_string();
-        std::string multicast_ip =
-            nmos::fields::multicast_ip(transport_params.at(0)).as_string();
-        std::string source_ip =
-            nmos::fields::source_ip(transport_params.at(0)).as_string();
+        std::string interface_ip = utility::us2s(
+            nmos::fields::interface_ip(transport_params.at(0)).as_string());
+        std::string multicast_ip = utility::us2s(
+            nmos::fields::multicast_ip(transport_params.at(0)).as_string());
+        std::string source_ip = utility::us2s(
+            nmos::fields::source_ip(transport_params.at(0)).as_string());
 
         int dest_port_07 = 5004;
         std::string interface_ip_07 = "";
@@ -72,12 +74,12 @@ namespace seeder::nmos_node::internal
         {
           dest_port_07 = nmos::fields::destination_port(transport_params.at(1))
                              .as_integer();
-          interface_ip_07 =
-              nmos::fields::interface_ip(transport_params.at(1)).as_string();
-          multicast_ip_07 =
-              nmos::fields::multicast_ip(transport_params.at(1)).as_string();
-          source_ip_07 =
-              nmos::fields::source_ip(transport_params.at(1)).as_string();
+          interface_ip_07 = utility::us2s(
+              nmos::fields::interface_ip(transport_params.at(1)).as_string());
+          multicast_ip_07 = utility::us2s(
+              nmos::fields::multicast_ip(transport_params.at(1)).as_string());
+          source_ip_07 = utility::us2s(
+              nmos::fields::source_ip(transport_params.at(1)).as_string());
           redundancy_enable = NodeSdpService::transport_param_rtp_enabled(
               transport_params.at(1), false);
         }
@@ -211,10 +213,10 @@ namespace seeder::nmos_node::internal
         {
           dest_port =
               nmos::fields::destination_port(transport_params.at(0)).as_integer();
-          destination_ip =
-              nmos::fields::destination_ip(transport_params.at(0)).as_string();
-          source_ip =
-              nmos::fields::source_ip(transport_params.at(0)).as_string();
+          destination_ip = utility::us2s(
+              nmos::fields::destination_ip(transport_params.at(0)).as_string());
+          source_ip = utility::us2s(
+              nmos::fields::source_ip(transport_params.at(0)).as_string());
           if (dest_port < 0 || 65535 < dest_port)
           {
             throw std::runtime_error("destination_port out of range");
@@ -224,10 +226,10 @@ namespace seeder::nmos_node::internal
           {
             dest_port_07 = nmos::fields::destination_port(transport_params.at(1))
                                .as_integer();
-            destination_ip_07 =
-                nmos::fields::destination_ip(transport_params.at(1)).as_string();
-            source_ip_07 =
-                nmos::fields::source_ip(transport_params.at(1)).as_string();
+            destination_ip_07 = utility::us2s(
+                nmos::fields::destination_ip(transport_params.at(1)).as_string());
+            source_ip_07 = utility::us2s(
+                nmos::fields::source_ip(transport_params.at(1)).as_string());
             redundancy_enable = NodeSdpService::transport_param_rtp_enabled(
                 transport_params.at(1), false);
             if (dest_port_07 < 0 || 65535 < dest_port_07)
@@ -252,12 +254,13 @@ namespace seeder::nmos_node::internal
 
         {
           std::lock_guard<std::mutex> sender_lock(ctx.sender_mutex);
+          const auto sender_id = utility::us2s(resource.id);
           VideoSender *video =
-              ctx.stream_store.find_video_sender_by_sender_id(resource.id);
+              ctx.stream_store.find_video_sender_by_sender_id(sender_id);
           AudioSender *audio =
-              ctx.stream_store.find_audio_sender_by_sender_id(resource.id);
+              ctx.stream_store.find_audio_sender_by_sender_id(sender_id);
           AncillarySender *ancillary =
-              ctx.stream_store.find_ancillary_sender_by_sender_id(resource.id);
+              ctx.stream_store.find_ancillary_sender_by_sender_id(sender_id);
           if (video)
           {
             video->enable = stream_enable;

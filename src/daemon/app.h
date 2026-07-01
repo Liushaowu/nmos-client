@@ -30,7 +30,9 @@ public:
   web::json::value node_settings_json() const;
   web::json::value available_registries_json() const;
   web::json::value update_node_config(const web::json::value &patch,
-                                      bool replace_entire_document);
+                                       bool replace_entire_document);
+  web::json::value daemon_config_json() const;
+  web::json::value update_daemon_config(const web::json::value &config);
 
 private:
   void restart_node_runtime();

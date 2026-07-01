@@ -3,7 +3,12 @@
 #include "daemon/video_format.h"
 #include "node_implementation.h"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
+#endif
 #include <cmath>
 #include <cpprest/basic_utils.h>
 #include <nmos/sdp_utils.h>

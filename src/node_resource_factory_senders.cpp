@@ -3,6 +3,7 @@
 #include "node_implementation.h"
 #include "node_resource_factory_internal.h"
 
+#include <cpprest/details/basic_types.h>
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/algorithm_ext/push_back.hpp>
 #include <boost/range/irange.hpp>
@@ -65,10 +66,9 @@ namespace seeder::nmos_node::internal
                               format_desc.framerate.numerator()},
                              {nmos::fields::denominator,
                               format_desc.framerate.denominator()}}));
-    nmos::colorspace colorspace =
-        (nmos::colorspace)video.colorspace;
-    nmos::transfer_characteristic transfer_characteristic =
-        (nmos::transfer_characteristic)video.transfer_characteristics;
+    nmos::colorspace colorspace{utility::s2us(video.colorspace)};
+    nmos::transfer_characteristic transfer_characteristic{
+        utility::s2us(video.transfer_characteristics)};
     nmos::resource source = nmos::make_video_source(
         source_id, device_id_, nmos::clock_names::clk0, frame_rate, settings_);
     impl::set_label_description(source, impl::ports::video, name);

@@ -29,6 +29,9 @@ private:
   void handle_patch(web::http::http_request request);
   void handle_settings_update(web::http::http_request request,
                               bool replace_entire_document);
+  void handle_daemon_config_get(web::http::http_request request);
+  void handle_daemon_config_put(web::http::http_request request);
+  void handle_index(web::http::http_request request);
 
   std::string url_;
   App &app_;

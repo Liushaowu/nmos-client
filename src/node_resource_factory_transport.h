@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cpprest/details/basic_types.h>
 #include <cpprest/json.h>
 #include <nmos/json_fields.h>
 
@@ -26,9 +27,11 @@ namespace seeder::nmos_node::internal::resource_factory_detail
       const int destination_port)
   {
     endpoint[nmos::fields::transport_params][leg_index]
-            [nmos::fields::multicast_ip] = web::json::value(multicast_ip);
+            [nmos::fields::multicast_ip] =
+                web::json::value::string(utility::s2us(multicast_ip));
     endpoint[nmos::fields::transport_params][leg_index]
-            [nmos::fields::interface_ip] = web::json::value(interface_ip);
+            [nmos::fields::interface_ip] =
+                web::json::value::string(utility::s2us(interface_ip));
     endpoint[nmos::fields::transport_params][leg_index]
             [nmos::fields::destination_port] = destination_port;
   }

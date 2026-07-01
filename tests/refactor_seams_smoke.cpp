@@ -35,17 +35,17 @@ namespace
     internal::StreamStore store;
     VideoSender sender;
     sender.id = "video-a";
-    sender.sender_id = U("sender-a");
+    sender.sender_id = "sender-a";
     store.add(sender);
 
     assert(nullptr != store.find_video_sender_by_id("video-a"));
-    assert(nullptr != store.find_video_sender_by_sender_id(U("sender-a")));
+    assert(nullptr != store.find_video_sender_by_sender_id("sender-a"));
 
     sender.name = "renamed";
     assert(store.replace(sender));
     assert("renamed" == store.find_video_sender_by_id("video-a")->name);
 
-    store.remove_video_sender_by_sender_id(U("sender-a"));
+    store.remove_video_sender_by_sender_id("sender-a");
     assert(nullptr == store.find_video_sender_by_id("video-a"));
   }
 

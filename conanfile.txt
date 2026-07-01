@@ -1,0 +1,9 @@
+[requires]
+nmos-cpp/cci.20260602
+
+[options]
+nmos-cpp/*:shared=False
+
+[generators]
+CMakeToolchain
+CMakeDeps

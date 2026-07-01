@@ -50,14 +50,40 @@ target_link_libraries(nmos-sync-daemon PRIVATE
     nmos-cpp::compile-settings
     nmos-cpp::nmos-cpp)
 
-install(TARGETS nmos-sync-daemon
-        RUNTIME DESTINATION opt/nmos-daemon/bin)
+if(WIN32)
+    target_link_libraries(nmos-sync-daemon PRIVATE ws2_32 iphlpapi)
+endif()
 
-install(FILES
-        ${CMAKE_SOURCE_DIR}/packaging/daemon_config.json
-        ${CMAKE_SOURCE_DIR}/packaging/node_config.json
-        DESTINATION opt/nmos-daemon/config)
+if(UNIX)
+    install(TARGETS nmos-sync-daemon
+            RUNTIME DESTINATION opt/nmos-daemon/bin)
 
-install(FILES
-        ${CMAKE_SOURCE_DIR}/packaging/nmos-daemon.service
-        DESTINATION etc/systemd/system)
+    install(FILES
+            ${CMAKE_SOURCE_DIR}/packaging/daemon_config.json
+            ${CMAKE_SOURCE_DIR}/packaging/node_config.json
+            DESTINATION opt/nmos-daemon/config)
+
+    install(FILES
+            ${CMAKE_SOURCE_DIR}/packaging/nmos-daemon.service
+            DESTINATION etc/systemd/system)
+else()
+    install(TARGETS nmos-sync-daemon
+            RUNTIME DESTINATION .)
+
+    install(FILES
+            ${CMAKE_SOURCE_DIR}/config/windows/node_config.json
+            DESTINATION .)
+    install(FILES
+            ${CMAKE_SOURCE_DIR}/config/windows/daemon_config.json
+            DESTINATION .)
+    install(FILES
+            ${CMAKE_SOURCE_DIR}/config/windows/start.bat
+            DESTINATION .)
+    install(FILES
+            ${CMAKE_SOURCE_DIR}/config/windows/config-ui.html
+            DESTINATION .)
+    install(FILES
+            ${CMAKE_SOURCE_DIR}/config/windows/install-service.ps1
+            ${CMAKE_SOURCE_DIR}/config/windows/uninstall-service.ps1
+            DESTINATION .)
+endif()

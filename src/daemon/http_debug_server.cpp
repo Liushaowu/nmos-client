@@ -4,8 +4,11 @@
 #include <cpprest/http_listener.h>
 
 #include <chrono>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -15,11 +18,47 @@ utility::string_t to_t(const std::string &value) {
 
 const utility::string_t SettingsPath = to_t("/api/nmos/settings");
 const utility::string_t SettingsUpdatePath = to_t("/api/nmos/settings/update");
+const utility::string_t DaemonConfigPath = to_t("/api/daemon/config");
+const utility::string_t IndexPath = to_t("/");
 
 web::json::value error_json(const std::string &message) {
   web::json::value object = web::json::value::object();
   object[to_t("error")] = web::json::value::string(to_t(message));
   return object;
+}
+
+std::string read_text_file(const std::string &path) {
+  std::ifstream stream(path, std::ios::binary);
+  if (!stream) {
+    throw std::runtime_error("failed to open file: " + path);
+  }
+
+  std::ostringstream buffer;
+  buffer << stream.rdbuf();
+  return buffer.str();
+}
+
+std::string read_index_html() {
+  const std::vector<std::string> candidates{
+      "config-ui.html",
+      "config/windows/config-ui.html",
+  };
+
+  std::vector<std::string> errors;
+  for (const auto &candidate : candidates) {
+    try {
+      return read_text_file(candidate);
+    } catch (const std::exception &error) {
+      errors.push_back(error.what());
+    }
+  }
+
+  std::ostringstream message;
+  message << "failed to load config UI HTML. Tried:";
+  for (const auto &error : errors) {
+    message << " " << error << ";";
+  }
+  throw std::runtime_error(message.str());
 }
 
 }
@@ -72,6 +111,10 @@ void HttpDebugServer::stop() {
 
 void HttpDebugServer::handle_get(web::http::http_request request) {
   const auto path = request.relative_uri().path();
+  if (path == IndexPath) {
+    handle_index(std::move(request));
+    return;
+  }
   if (path == to_t("/api/nmos/health")) {
     web::json::value object = web::json::value::object();
     object[to_t("ok")] = web::json::value::boolean(true);
@@ -86,7 +129,8 @@ void HttpDebugServer::handle_get(web::http::http_request request) {
     try {
       request.reply(web::http::status_codes::OK, app_.node_settings_json());
     } catch (const std::exception &error) {
-      request.reply(web::http::status_codes::InternalError, error_json(error.what()));
+      request.reply(web::http::status_codes::InternalError,
+                    error_json(error.what()));
     }
     return;
   }
@@ -94,12 +138,17 @@ void HttpDebugServer::handle_get(web::http::http_request request) {
     try {
       request.reply(web::http::status_codes::OK, app_.available_registries_json());
     } catch (const std::exception &error) {
-      request.reply(web::http::status_codes::InternalError, error_json(error.what()));
+      request.reply(web::http::status_codes::InternalError,
+                    error_json(error.what()));
     }
     return;
   }
   if (path == to_t("/api/nmos/snapshot")) {
     request.reply(web::http::status_codes::OK, state_store_.snapshot_json());
+    return;
+  }
+  if (path == DaemonConfigPath) {
+    handle_daemon_config_get(std::move(request));
     return;
   }
 
@@ -118,6 +167,10 @@ void HttpDebugServer::handle_post(web::http::http_request request) {
 
 void HttpDebugServer::handle_put(web::http::http_request request) {
   const auto path = request.relative_uri().path();
+  if (path == DaemonConfigPath) {
+    handle_daemon_config_put(std::move(request));
+    return;
+  }
   if (path != SettingsUpdatePath) {
     request.reply(web::http::status_codes::NotFound);
     return;
@@ -144,6 +197,37 @@ void HttpDebugServer::handle_settings_update(web::http::http_request request,
                   app_.update_node_config(body, replace_entire_document));
   } catch (const std::exception &error) {
     request.reply(web::http::status_codes::BadRequest, error_json(error.what()));
+  }
+}
+
+void HttpDebugServer::handle_daemon_config_get(web::http::http_request request) {
+  try {
+    request.reply(web::http::status_codes::OK, app_.daemon_config_json());
+  } catch (const std::exception &error) {
+    request.reply(web::http::status_codes::InternalError,
+                  error_json(error.what()));
+  }
+}
+
+void HttpDebugServer::handle_daemon_config_put(web::http::http_request request) {
+  try {
+    const auto body = request.extract_json().get();
+    request.reply(web::http::status_codes::OK,
+                  app_.update_daemon_config(body));
+  } catch (const std::exception &error) {
+    request.reply(web::http::status_codes::BadRequest, error_json(error.what()));
+  }
+}
+
+void HttpDebugServer::handle_index(web::http::http_request request) {
+  try {
+    web::http::http_response response(web::http::status_codes::OK);
+    response.headers().set_content_type(to_t("text/html; charset=utf-8"));
+    response.set_body(read_index_html());
+    request.reply(response);
+  } catch (const std::exception &error) {
+    request.reply(web::http::status_codes::InternalError,
+                  error_json(error.what()));
   }
 }
 

@@ -202,6 +202,24 @@ web::json::value App::update_node_config(const web::json::value &patch,
   return result;
 }
 
+web::json::value App::daemon_config_json() const {
+  return DaemonConfig::load_from_file(config_path_).to_json();
+}
+
+web::json::value App::update_daemon_config(const web::json::value &config) {
+  if (!config.is_object()) {
+    throw std::runtime_error("daemon config payload must be a JSON object");
+  }
+
+  DaemonConfig::save_to_file(config_path_, config);
+  config_ = DaemonConfig::load_from_file(config_path_);
+
+  web::json::value result = web::json::value::object();
+  result[to_t("restart_required")] = web::json::value::boolean(true);
+  result[to_t("saved")] = web::json::value::boolean(true);
+  return result;
+}
+
 void App::restart_node_runtime() {
   if (!node_) {
     throw std::runtime_error("node runtime is not initialized");

@@ -42,7 +42,7 @@ find_interface(
 nmos::id make_id(const nmos::id &seed_id, const nmos::type &type,
                  const impl::port &port, const std::string &id) {
   return nmos::make_repeatable_id(seed_id, U("/x-nmos/node/") + type.name +
-                                               U('/') + port.name + id);
+                                               U('/') + port.name + utility::s2us(id));
 }
 
 // generate a repeatable source-specific multicast address for each leg of a
@@ -88,13 +88,13 @@ void set_label_description(nmos::resource &resource, const impl::port &port,
   auto label = nmos::fields::label(resource.data);
   if (!label.empty())
     label += U('/');
-  label += resource.type.name + U('/') + port.name + U('/') + name;
+  label += resource.type.name + U('/') + port.name + U('/') + utility::s2us(name);
   resource.data[nmos::fields::label] = value::string(label);
 
   auto description = nmos::fields::description(resource.data);
   if (!description.empty())
     description += U('/');
-  description += resource.type.name + U('/') + port.name + U('/') + name;
+  description += resource.type.name + U('/') + port.name + U('/') + utility::s2us(name);
   resource.data[nmos::fields::description] = value::string(description);
 }
 

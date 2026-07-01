@@ -132,7 +132,8 @@ namespace seeder::nmos_node::internal
                               set_transportfile_(*sender, connection_sender,
                                                  endpoint_transportfile);
                               std::string transportfile_json =
-                                  endpoint_transportfile.serialize();
+                                  utility::conversions::to_utf8string(
+                                      endpoint_transportfile.serialize());
                               slog::log<slog::severities::info>(*gate_, SLOG_FLF)
                                   << "Updated transportfile for sender "
                                   << sender_id << ": " << transportfile_json;

@@ -50,6 +50,46 @@ std::string get_string_or(const web::json::value &object, const char *name,
 
 namespace seeder::nmos_sync {
 
+web::json::value DaemonConfig::to_json() const {
+  web::json::value obj = web::json::value::object();
+  obj[to_t("node_config_path")] =
+      web::json::value::string(to_t(node_config_path));
+  obj[to_t("snapshot_url")] = web::json::value::string(to_t(snapshot_url));
+  obj[to_t("ws_url")] = web::json::value::string(to_t(ws_url));
+  obj[to_t("pull_timeout_ms")] = web::json::value::number(pull_timeout_ms);
+  obj[to_t("reconnect_interval_ms")] =
+      web::json::value::number(reconnect_interval_ms);
+  obj[to_t("ws_heartbeat_interval_ms")] =
+      web::json::value::number(ws_heartbeat_interval_ms);
+  obj[to_t("ws_heartbeat_timeout_ms")] =
+      web::json::value::number(ws_heartbeat_timeout_ms);
+  obj[to_t("snapshot_debounce_ms")] =
+      web::json::value::number(snapshot_debounce_ms);
+  obj[to_t("debug_http_url")] =
+      web::json::value::string(to_t(debug_http_url));
+  return obj;
+}
+
+void DaemonConfig::save_to_file(const std::string &file_path,
+                                const web::json::value &json) {
+  if (!json.is_object()) {
+    throw std::runtime_error("daemon config must be a JSON object");
+  }
+
+  const auto serialized = json.serialize();
+  std::ofstream stream(file_path, std::ios::binary | std::ios::trunc);
+  if (!stream) {
+    throw std::runtime_error("failed to open daemon config file for writing: " +
+                             file_path);
+  }
+  const auto utf8 = to_utf8(serialized);
+  stream.write(utf8.data(), static_cast<std::streamsize>(utf8.size()));
+  if (!stream) {
+    throw std::runtime_error("failed to write daemon config file: " +
+                             file_path);
+  }
+}
+
 DaemonConfig DaemonConfig::load_from_file(const std::string &file_path) {
   std::ifstream stream(file_path);
   if (!stream) {

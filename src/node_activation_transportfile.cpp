@@ -41,7 +41,7 @@ namespace seeder::nmos_node::internal
         {
           throw std::logic_error("matching IS-04 sender flow_id not found");
         }
-        std::string flow_id = nmos::fields::flow_id(sender.data).as_string();
+        const nmos::id flow_id = nmos::fields::flow_id(sender.data).as_string();
         auto flow =
             nmos::find_resource(node_resources, {flow_id, nmos::types::flow});
         if (node_resources.end() == flow)
@@ -52,14 +52,14 @@ namespace seeder::nmos_node::internal
         {
           throw std::logic_error("matching IS-04 flow source_id not found");
         }
-        std::string source_id = nmos::fields::source_id(flow->data);
+        const nmos::id source_id = nmos::fields::source_id(flow->data);
         auto source = nmos::find_resource(node_resources,
                                           {source_id, nmos::types::source});
         if (node_resources.end() == source)
         {
           throw std::logic_error("matching IS-04 source not found");
         }
-        std::string session_name = nmos::fields::description(sender.data);
+        utility::string_t session_name = nmos::fields::description(sender.data);
         const auto &transport_params = nmos::fields::transport_params(
             nmos::fields::endpoint_active(connection_sender.data));
         auto transportfile_transport_params = transport_params;
@@ -124,10 +124,14 @@ namespace seeder::nmos_node::internal
               }
               catch (const std::exception &error)
               {
+                const auto flow_json = utility::conversions::to_utf8string(
+                    flow->data.serialize());
+                const auto sender_json = utility::conversions::to_utf8string(
+                    sender.data.serialize());
                 throw std::runtime_error(
                     std::string("failed to make video/raw SDP parameters: ") +
-                    error.what() + ", flow=" + flow->data.serialize() +
-                    ", sender=" + sender.data.serialize());
+                    error.what() + ", flow=" + flow_json +
+                    ", sender=" + sender_json);
               }
               const auto ts_refclk = nmos::details::make_ts_refclk(
                   node->data, source->data, sender.data, ctx.ptp_domain_number);
@@ -182,7 +186,7 @@ namespace seeder::nmos_node::internal
           throw std::logic_error("failed to make SDP parameters");
         }();
 
-        std::string transport_params_json =
+        utility::string_t transport_params_json =
             transportfile_transport_params.serialize();
         std::cout << "transport_params_json: "
                   << utility::us2s(transport_params_json) << std::endl;

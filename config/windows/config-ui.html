@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NMOS Daemon Configuration</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,monospace;background:#1a1a2e;color:#e0e0e0;min-height:100vh}
+  header{background:#16213e;padding:16px 24px;border-bottom:2px solid #0f3460}
+  header h1{font-size:20px;font-weight:600;color:#e94560}
+  header p{font-size:12px;color:#8899aa;margin-top:4px}
+  main{max-width:1200px;margin:0 auto;padding:24px;display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  @media(max-width:768px){main{grid-template-columns:1fr}}
+  .panel{background:#16213e;border:1px solid #0f3460;border-radius:8px;overflow:hidden}
+  .panel-header{background:#0f3460;padding:12px 16px;display:flex;justify-content:space-between;align-items:center}
+  .panel-header h2{font-size:14px;font-weight:600;color:#e94560}
+  .panel-body{padding:16px}
+  textarea{width:100%;height:420px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:12px;font-family:'Cascadia Code','Fira Code','Consolas',monospace;font-size:12px;line-height:1.5;resize:vertical;white-space:pre;overflow-wrap:normal;overflow-x:auto}
+  textarea:focus{outline:none;border-color:#e94560;box-shadow:0 0 0 2px rgba(233,69,96,0.25)}
+  .actions{display:flex;gap:8px;margin-top:12px;align-items:center}
+  button{background:#e94560;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.2s}
+  button:hover{background:#c73652}
+  button:disabled{background:#555;cursor:not-allowed}
+  button.secondary{background:#0f3460;color:#c9d1d9}
+  button.secondary:hover{background:#1a4a7a}
+  .status{font-size:12px;padding:6px 12px;border-radius:4px;display:inline-block}
+  .status.success{background:#1a3a1a;color:#4caf50}
+  .status.error{background:#3a1a1a;color:#f44336}
+  .status.loading{background:#1a1a3a;color:#64b5f6}
+  .note{font-size:11px;color:#8899aa;margin-top:8px;line-height:1.4}
+  .badge{font-size:10px;padding:2px 8px;border-radius:10px;background:#e94560;color:#fff;margin-left:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>NMOS Daemon Configuration</h1>
+  <p>Edit node_config.json and daemon_config.json via the built-in HTTP API</p>
+</header>
+<main>
+  <div class="panel">
+    <div class="panel-header">
+      <h2>Daemon Config <span class="badge">daemon_config.json</span></h2>
+    </div>
+    <div class="panel-body">
+      <textarea id="daemon-editor" spellcheck="false"></textarea>
+      <div class="actions">
+        <button id="daemon-save-btn" onclick="saveDaemonConfig()">Save</button>
+        <button class="secondary" onclick="loadDaemonConfig()">Reload</button>
+        <span id="daemon-status" class="status"></span>
+      </div>
+      <p class="note">Saving daemon config requires a daemon restart to take effect.</p>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">
+      <h2>Node Config <span class="badge">node_config.json</span></h2>
+    </div>
+    <div class="panel-body">
+      <textarea id="node-editor" spellcheck="false"></textarea>
+      <div class="actions">
+        <button id="node-save-btn" onclick="saveNodeConfig()">Save</button>
+        <button class="secondary" onclick="loadNodeConfig()">Reload</button>
+        <span id="node-status" class="status"></span>
+      </div>
+      <p class="note">Saving node config triggers an automatic node runtime restart.</p>
+    </div>
+  </div>
+</main>
+<script>
+function setStatus(id, msg, cls) {
+  var el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'status ' + cls;
+  setTimeout(function() { el.textContent = ''; el.className = 'status'; }, 5000);
+}
+
+function prettyJson(obj) {
+  return JSON.stringify(obj, null, 2);
+}
+
+function loadDaemonConfig() {
+  setStatus('daemon-status', 'Loading...', 'loading');
+  fetch('/api/daemon/config')
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'HTTP ' + r.status); });
+      return r.json();
+    })
+    .then(function(data) {
+      document.getElementById('daemon-editor').value = prettyJson(data);
+      setStatus('daemon-status', 'Loaded', 'success');
+    })
+    .catch(function(err) {
+      setStatus('daemon-status', 'Error: ' + err.message, 'error');
+    });
+}
+
+function loadNodeConfig() {
+  setStatus('node-status', 'Loading...', 'loading');
+  fetch('/api/nmos/settings')
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'HTTP ' + r.status); });
+      return r.json();
+    })
+    .then(function(data) {
+      document.getElementById('node-editor').value = prettyJson(data);
+      setStatus('node-status', 'Loaded', 'success');
+    })
+    .catch(function(err) {
+      setStatus('node-status', 'Error: ' + err.message, 'error');
+    });
+}
+
+function saveDaemonConfig() {
+  var btn = document.getElementById('daemon-save-btn');
+  var raw = document.getElementById('daemon-editor').value;
+  try { JSON.parse(raw); } catch(e) {
+    setStatus('daemon-status', 'Invalid JSON: ' + e.message, 'error');
+    return;
+  }
+  setStatus('daemon-status', 'Saving...', 'loading');
+  btn.disabled = true;
+  fetch('/api/daemon/config', { method: 'PUT', body: raw, headers: { 'Content-Type': 'application/json' } })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'HTTP ' + r.status); });
+      return r.json();
+    })
+    .then(function(data) {
+      setStatus('daemon-status', 'Saved. Restart required: ' + (data.restart_required ? 'yes' : 'no'), 'success');
+    })
+    .catch(function(err) {
+      setStatus('daemon-status', 'Error: ' + err.message, 'error');
+    })
+    .finally(function() { btn.disabled = false; });
+}
+
+function saveNodeConfig() {
+  var btn = document.getElementById('node-save-btn');
+  var raw = document.getElementById('node-editor').value;
+  try { JSON.parse(raw); } catch(e) {
+    setStatus('node-status', 'Invalid JSON: ' + e.message, 'error');
+    return;
+  }
+  setStatus('node-status', 'Saving...', 'loading');
+  btn.disabled = true;
+  fetch('/api/nmos/settings/update', { method: 'PUT', body: raw, headers: { 'Content-Type': 'application/json' } })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'HTTP ' + r.status); });
+      return r.json();
+    })
+    .then(function(data) {
+      setStatus('node-status', 'Saved & node restarted', 'success');
+      document.getElementById('node-editor').value = prettyJson(data.persisted);
+    })
+    .catch(function(err) {
+      setStatus('node-status', 'Error: ' + err.message, 'error');
+    })
+    .finally(function() { btn.disabled = false; });
+}
+
+loadDaemonConfig();
+loadNodeConfig();
+</script>
+</body>
+</html>

@@ -63,7 +63,7 @@ namespace seeder::nmos_node::internal
       }
       if (!interfaces.empty())
       {
-        return make_runtime_interface_leg(interfaces.front(), std::string{});
+        return make_runtime_interface_leg(interfaces.front(), utility::string_t{});
       }
       return RuntimeInterfaceLeg{};
     }
@@ -89,7 +89,7 @@ namespace seeder::nmos_node::internal
         const auto &secondary = (interfaces[0].name == primary.interface.name)
                                     ? interfaces[1]
                                     : interfaces[0];
-        return make_runtime_interface_leg(secondary, std::string{});
+        return make_runtime_interface_leg(secondary, utility::string_t{});
       }
       return select_runtime_interface_leg(interfaces, std::string{});
     }
@@ -150,8 +150,9 @@ namespace seeder::nmos_node::internal
       {
         {
           std::lock_guard<std::mutex> sender_lock(ctx.sender_mutex);
+          const auto sender_id = utility::us2s(connection_resource.id);
           VideoSender *video =
-              ctx.stream_store.find_video_sender_by_sender_id(connection_resource.id);
+              ctx.stream_store.find_video_sender_by_sender_id(sender_id);
           if (video)
           {
             smpte2022_7 = video->redundancy.present;
@@ -162,7 +163,7 @@ namespace seeder::nmos_node::internal
             port = video->port;
           }
           AudioSender *audio =
-              ctx.stream_store.find_audio_sender_by_sender_id(connection_resource.id);
+              ctx.stream_store.find_audio_sender_by_sender_id(sender_id);
           if (audio)
           {
             smpte2022_7 = audio->redundancy.present;
@@ -173,7 +174,7 @@ namespace seeder::nmos_node::internal
             port = audio->port;
           }
           AncillarySender *ancillary =
-              ctx.stream_store.find_ancillary_sender_by_sender_id(connection_resource.id);
+              ctx.stream_store.find_ancillary_sender_by_sender_id(sender_id);
           if (ancillary)
           {
             smpte2022_7 = ancillary->redundancy.present;
@@ -205,13 +206,13 @@ namespace seeder::nmos_node::internal
         nmos::details::resolve_auto(transport_params_array[0],
                                     nmos::fields::destination_ip,
                                     [&]
-                                    { return value::string(ip); });
+                                    { return value::string(utility::s2us(ip)); });
         if (smpte2022_7 && transport_params_array.size() > 1)
         {
           nmos::details::resolve_auto(
               transport_params_array[1], nmos::fields::destination_ip,
               [&]
-              { return value::string(redundancy_ip); });
+              { return value::string(utility::s2us(redundancy_ip)); });
         }
         nmos::resolve_rtp_auto(id_type.second, transport_params, port);
       }
@@ -279,16 +280,16 @@ namespace seeder::nmos_node::internal
         }
         const auto selection = select_runtime_interfaces(
             interfaces, primary_source_ip, redundancy_source_ip, smpte2022_7);
-        interface_ip = selection.primary.ip;
-        secondary_interface_ip = selection.redundancy.ip;
+        interface_ip = utility::us2s(selection.primary.ip);
+        secondary_interface_ip = utility::us2s(selection.redundancy.ip);
         nmos::details::resolve_auto(transport_params_array[0],
                                     nmos::fields::multicast_ip,
                                     [&]
-                                    { return value::string(ip); });
+                                    { return value::string(utility::s2us(ip)); });
         nmos::details::resolve_auto(transport_params_array[0],
                                     nmos::fields::source_ip,
                                     [&]
-                                    { return value::string(source_ip); });
+                                    { return value::string(utility::s2us(source_ip)); });
         nmos::details::resolve_auto(transport_params_array[0],
                                     nmos::fields::destination_port,
                                     [&]
@@ -296,13 +297,13 @@ namespace seeder::nmos_node::internal
         nmos::details::resolve_auto(
             transport_params_array[0], nmos::fields::interface_ip,
             [&]
-            { return value::string(interface_ip); });
+            { return value::string(utility::s2us(interface_ip)); });
         if (smpte2022_7 && transport_params_array.size() > 1)
         {
           nmos::details::resolve_auto(
               transport_params_array[1], nmos::fields::multicast_ip,
               [&]
-              { return value::string(secondary_multicast_ip); });
+              { return value::string(utility::s2us(secondary_multicast_ip)); });
           nmos::details::resolve_auto(
               transport_params_array[1], nmos::fields::destination_port,
               [&]
@@ -310,7 +311,7 @@ namespace seeder::nmos_node::internal
           nmos::details::resolve_auto(
               transport_params_array[1], nmos::fields::interface_ip,
               [&]
-              { return value::string(secondary_interface_ip); });
+              { return value::string(utility::s2us(secondary_interface_ip)); });
         }
         nmos::resolve_rtp_auto(id_type.second, transport_params);
       }

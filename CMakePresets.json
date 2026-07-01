@@ -30,6 +30,42 @@
         "cacheVariables": {
           "CMAKE_BUILD_TYPE": "Release"
         }
+      },
+      {
+        "name": "win-release",
+        "displayName": "Windows x64 Release (static, VS2022)",
+        "binaryDir": "${sourceDir}/build/win-release",
+        "generator": "Visual Studio 17 2022",
+        "architecture": "x64",
+        "toolchainFile": "${sourceDir}/build/win-release/conan_toolchain.cmake",
+        "toolset": {
+          "value": "v143",
+          "strategy": "external"
+        },
+        "cacheVariables": {
+          "CMAKE_CONFIGURATION_TYPES": "Release",
+          "CMAKE_CXX_STANDARD": "17",
+          "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
+          "CMAKE_POLICY_DEFAULT_CMP0091": "NEW"
+        }
+      },
+      {
+        "name": "win-debug",
+        "displayName": "Windows x64 Debug (static, VS2022)",
+        "binaryDir": "${sourceDir}/build/win-debug",
+        "generator": "Visual Studio 17 2022",
+        "architecture": "x64",
+        "toolchainFile": "${sourceDir}/build/win-debug/conan_toolchain.cmake",
+        "toolset": {
+          "value": "v143",
+          "strategy": "external"
+        },
+        "cacheVariables": {
+          "CMAKE_CONFIGURATION_TYPES": "Debug",
+          "CMAKE_CXX_STANDARD": "17",
+          "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDebug",
+          "CMAKE_POLICY_DEFAULT_CMP0091": "NEW"
+        }
       }
     ],
     "buildPresets": [
@@ -41,6 +77,16 @@
       {
         "name": "release",
         "configurePreset": "release",
+        "jobs": 8
+      },
+      {
+        "name": "win-release",
+        "configurePreset": "win-release",
+        "jobs": 8
+      },
+      {
+        "name": "win-debug",
+        "configurePreset": "win-debug",
         "jobs": 8
       }
     ],
@@ -61,6 +107,20 @@
         "name": "release",
         "inherits": "base",
         "configurePreset": "release"
+      },
+      {
+        "name": "win-release",
+        "configurePreset": "win-release",
+        "generators": [
+          "ZIP"
+        ]
+      },
+      {
+        "name": "win-debug",
+        "configurePreset": "win-debug",
+        "generators": [
+          "ZIP"
+        ]
       }
     ],
     "workflowPresets": [
@@ -95,6 +155,23 @@
           {
             "type": "package",
             "name": "release"
+          }
+        ]
+      },
+      {
+        "name": "win-release",
+        "steps": [
+          {
+            "type": "configure",
+            "name": "win-release"
+          },
+          {
+            "type": "build",
+            "name": "win-release"
+          },
+          {
+            "type": "package",
+            "name": "win-release"
           }
         ]
       }

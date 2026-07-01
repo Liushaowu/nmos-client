@@ -1,14 +1,20 @@
 #include "node_settings.h"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+#else
 #include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
 #include <cpprest/basic_utils.h>
 #include <cpprest/asyncrt_utils.h>
-#include <ifaddrs.h>
 #include <mdns/service_discovery.h>
-#include <netinet/in.h>
 #include <nmos/mdns.h>
 #include <nmos/version.h>
-#include <sys/socket.h>
 
 #include <algorithm>
 #include <cstring>
@@ -35,6 +41,74 @@ namespace seeder::nmos_node::internal
 
     std::string resolve_interface_ipv4_address(const std::string &interface_name)
     {
+#ifdef _WIN32
+      // Windows: use GetAdaptersAddresses
+      ULONG buf_len = 15000;
+      std::vector<BYTE> buf(buf_len);
+      auto *adapters = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data());
+
+      ULONG ret = GetAdaptersAddresses(AF_INET,
+          GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
+          nullptr, adapters, &buf_len);
+      if (ERROR_BUFFER_OVERFLOW == ret)
+      {
+        buf.resize(buf_len);
+        adapters = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data());
+        ret = GetAdaptersAddresses(AF_INET,
+            GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
+            nullptr, adapters, &buf_len);
+      }
+      if (NO_ERROR != ret)
+      {
+        throw std::runtime_error(
+            "Failed to enumerate network interfaces while resolving interfaces entry '" +
+            interface_name + "'");
+      }
+
+      for (auto *adapter = adapters; adapter != nullptr; adapter = adapter->Next)
+      {
+        // 匹配 AdapterName（如 {GUID}）或 FriendlyName（如 "以太网"）
+        if (nullptr == adapter->AdapterName)
+          continue;
+        std::string adapter_name(adapter->AdapterName);
+        bool name_matched = (adapter_name == interface_name);
+        if (!name_matched && nullptr != adapter->FriendlyName)
+        {
+          std::wstring friendly(adapter->FriendlyName);
+          std::string friendly_utf8;
+          int required = WideCharToMultiByte(CP_UTF8, 0, friendly.c_str(), -1,
+                                             nullptr, 0, nullptr, nullptr);
+          if (required > 0)
+          {
+            friendly_utf8.resize(static_cast<size_t>(required - 1));
+            WideCharToMultiByte(CP_UTF8, 0, friendly.c_str(), -1,
+                                &friendly_utf8[0], required, nullptr, nullptr);
+          }
+          name_matched = (friendly_utf8 == interface_name);
+        }
+        if (!name_matched)
+          continue;
+
+        for (auto *addr = adapter->FirstUnicastAddress; addr != nullptr;
+             addr = addr->Next)
+        {
+          if (AF_INET != addr->Address.lpSockaddr->sa_family)
+            continue;
+
+          char address_buffer[INET_ADDRSTRLEN] = {};
+          const auto *sin = reinterpret_cast<const sockaddr_in *>(
+              addr->Address.lpSockaddr);
+          inet_ntop(AF_INET, &sin->sin_addr, address_buffer,
+                    sizeof(address_buffer));
+          return address_buffer;
+        }
+      }
+
+      throw std::runtime_error(
+          "No IPv4 address found for interfaces entry '" + interface_name + "'");
+
+#else
+      // Linux: use getifaddrs
       ifaddrs *interfaces = nullptr;
       if (0 != getifaddrs(&interfaces))
       {
@@ -71,6 +145,7 @@ namespace seeder::nmos_node::internal
 
       freeifaddrs(interfaces);
       return resolved_address;
+#endif
     }
 
     void set_host_addresses(web::json::value &settings,

@@ -30,7 +30,6 @@
 #include "node_server_runtime.h"
 #include "node_settings.h"
 #include "node_stream_store.h"
-#include <asm-generic/errno.h>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -40,15 +39,12 @@
 #include <cpprest/json_ops.h>
 #include <cpprest/json_utils.h>
 #include <functional>
-#include <ifaddrs.h>
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <netinet/in.h>
 #include <optional>
 #include <fstream>
 #include <sstream>
-#include <sys/socket.h>
 #include <thread>
 #include <nmos/capabilities.h>
 #include <nmos/connection_api.h>
@@ -140,8 +136,10 @@ namespace seeder
       internal::NodeRuntimeInterfaceUpdater runtime_interface_updater_;
       internal::NodePtpClockUpdater ptp_clock_updater_;
       internal::NodeLifecycleController lifecycle_controller_;
+#ifdef HAVE_LLDP
       std::shared_ptr<lldp::lldp_manager> lldp_manager_;
       std::shared_ptr<lldp::lldp_manager_guard> lldp_manager_guard_;
+#endif
 
       Impl()
           : event_bridge_(internal::NodeEventBridgeContext{callbacks_}),
@@ -372,7 +370,7 @@ namespace seeder
         node_id_ = node_id;
         device_id_ = device_id;
         seed_id_ = seed_id;                                                                            
-        const auto clocks = web::json::value_of({nmos::make_ptp_clock(nmos::clock_names::clk0, false, "00-00-00-00-00-00-00-00", false)});
+        const auto clocks = web::json::value_of({nmos::make_ptp_clock(nmos::clock_names::clk0, false, U("00-00-00-00-00-00-00-00"), false)});
 
         // filter network interfaces to those that correspond to the specified
         // host_addresses

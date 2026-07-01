@@ -3,6 +3,7 @@
 #include "node_implementation.h"
 #include "node_connection_transport_params.h"
 
+#include <cpprest/details/basic_types.h>
 #include <nmos/format.h>
 
 #include <utility>
@@ -291,7 +292,7 @@ namespace seeder::nmos_node::internal
       throw node_implementation_init_exception(
           "add video sender connection failed!");
     }
-    video.sender_id = sender_id;
+    video.sender_id = utility::us2s(sender_id);
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
       stream_store_.add(std::move(video));
@@ -342,7 +343,7 @@ namespace seeder::nmos_node::internal
       throw node_implementation_init_exception(
           "insert audio connection sender failed!");
     }
-    audio.sender_id = sender_id;
+    audio.sender_id = utility::us2s(sender_id);
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
       stream_store_.add(std::move(audio));
@@ -390,7 +391,7 @@ namespace seeder::nmos_node::internal
       throw node_implementation_init_exception(
           "add ancillary sender connection failed!");
     }
-    ancillary.sender_id = sender_id;
+    ancillary.sender_id = utility::us2s(sender_id);
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
       stream_store_.add(std::move(ancillary));
@@ -550,7 +551,7 @@ namespace seeder::nmos_node::internal
 
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      remove_video_sender_by_sender_id(sender_v_id);
+      remove_video_sender_by_sender_id(utility::us2s(sender_v_id));
     }
 
     stream_store_.remove_sender_resource_ids(sender_v_id, source_v_id,
@@ -592,7 +593,7 @@ namespace seeder::nmos_node::internal
 
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      remove_audio_sender_by_sender_id(sender_a_id);
+      remove_audio_sender_by_sender_id(utility::us2s(sender_a_id));
     }
 
     stream_store_.remove_sender_resource_ids(sender_a_id, source_a_id,
@@ -634,7 +635,7 @@ namespace seeder::nmos_node::internal
 
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      remove_ancillary_sender_by_sender_id(sender_id);
+      remove_ancillary_sender_by_sender_id(utility::us2s(sender_id));
     }
 
     stream_store_.remove_sender_resource_ids(sender_id, source_id, flow_id);
@@ -741,7 +742,7 @@ namespace seeder::nmos_node::internal
     auto resources = make_video_sender_resources(video);
     replace_sender_resources("update video sender", std::move(resources),
                              video.redundancy.present);
-    video.sender_id = sender_id;
+    video.sender_id = utility::us2s(sender_id);
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
       stream_store_.replace(video);
@@ -768,7 +769,7 @@ namespace seeder::nmos_node::internal
     auto resources = make_audio_sender_resources(audio);
     replace_sender_resources("update audio sender", std::move(resources),
                              audio.redundancy.present);
-    audio.sender_id = sender_id;
+    audio.sender_id = utility::us2s(sender_id);
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
       stream_store_.replace(audio);
@@ -795,7 +796,7 @@ namespace seeder::nmos_node::internal
     auto resources = make_ancillary_sender_resources(ancillary);
     replace_sender_resources("update ancillary sender", std::move(resources),
                              ancillary.redundancy.present);
-    ancillary.sender_id = sender_id;
+    ancillary.sender_id = utility::us2s(sender_id);
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
       stream_store_.replace(ancillary);
