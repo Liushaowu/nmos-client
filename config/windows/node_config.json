@@ -43,8 +43,6 @@
     "is10_versions": ["v1.0"],
     "is12_versions": ["v1.0"],
     "pri": 100,
-    "highest_pri": 0,
-    "lowest_pri": 2147483647,
     "authorization_highest_pri": 0,
     "authorization_lowest_pri": 2147483647,
     "discovery_backoff_min": 1,
@@ -61,5 +59,12 @@
     "events_expiry_interval": 12,
     "label": "UE Engine",
     "description": "NMOS Client",
-    "manufacturer_name": "SEEDER"
+    "manufacturer_name": "SEEDER",
+    "logging_level":0,
+    "access_log":"access.log",
+    "error_log":"error.log",
+    "registry_address":"",
+    "registration_port":3210,
+    "host_addresses":[],
+    "host_address":""
 }

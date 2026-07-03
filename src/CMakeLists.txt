@@ -66,6 +66,13 @@ if(UNIX)
     install(FILES
             ${CMAKE_SOURCE_DIR}/packaging/nmos-daemon.service
             DESTINATION etc/systemd/system)
+    install(FILES
+            ${CMAKE_SOURCE_DIR}/config/windows/config-ui.html
+            DESTINATION opt/nmos-daemon)
+    install(PROGRAMS
+            ${CMAKE_SOURCE_DIR}/packaging/start-service.sh
+            ${CMAKE_SOURCE_DIR}/packaging/stop-service.sh
+            DESTINATION opt/nmos-daemon)
 else()
     install(TARGETS nmos-sync-daemon
             RUNTIME DESTINATION .)
@@ -83,7 +90,16 @@ else()
             ${CMAKE_SOURCE_DIR}/config/windows/config-ui.html
             DESTINATION .)
     install(FILES
-            ${CMAKE_SOURCE_DIR}/config/windows/install-service.ps1
-            ${CMAKE_SOURCE_DIR}/config/windows/uninstall-service.ps1
+            ${CMAKE_SOURCE_DIR}/config/windows/install-service.bat
+            ${CMAKE_SOURCE_DIR}/config/windows/start-service.bat
+            ${CMAKE_SOURCE_DIR}/config/windows/stop-service.bat
+            ${CMAKE_SOURCE_DIR}/config/windows/uninstall-service.bat
             DESTINATION .)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/nssm-2.24/win64/nssm.exe")
+        install(FILES
+                "${CMAKE_SOURCE_DIR}/nssm-2.24/win64/nssm.exe"
+                DESTINATION nssm-2.24/win64)
+    else()
+        message(WARNING "nssm-2.24/win64/nssm.exe not found; Windows service registration package will be incomplete")
+    endif()
 endif()

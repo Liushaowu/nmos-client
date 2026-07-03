@@ -1,10 +1,12 @@
 #pragma once
 
 #include <cpprest/json.h>
+#include <cpprest/host_utils.h>
 #include <nmos/mdns.h>
 #include <slog/all_in_one.h>
 
 #include <string>
+#include <vector>
 
 namespace seeder::nmos_node::internal
 {
@@ -12,8 +14,12 @@ namespace seeder::nmos_node::internal
   void write_json_file(const std::string &file_path,
                        const web::json::value &value);
   void apply_interface_host_addresses(web::json::value &settings);
+  std::vector<web::hosts::experimental::host_interface>
+  friendly_named_host_interfaces(
+      const std::vector<web::hosts::experimental::host_interface> &interfaces);
   web::json::value registration_api_to_json(
       const nmos::experimental::resolved_service &service);
+  web::json::value network_interfaces_json();
 
   class NodeSettings
   {

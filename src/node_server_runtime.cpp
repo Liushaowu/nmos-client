@@ -70,7 +70,14 @@ namespace seeder::nmos_node::internal
       ctx.node_model.settings = ctx.settings.load_runtime_settings();
 
       // Prepare run-time default settings (different than header defaults)
+      const auto persisted_settings_before_interface_resolution =
+          ctx.node_model.settings.serialize();
       apply_interface_host_addresses(ctx.node_model.settings);
+      if (ctx.node_model.settings.serialize() !=
+          persisted_settings_before_interface_resolution)
+      {
+        ctx.settings.write_persisted_settings(ctx.node_model.settings);
+      }
       nmos::insert_node_default_settings(ctx.node_model.settings);
 
       // copy to the logging settings

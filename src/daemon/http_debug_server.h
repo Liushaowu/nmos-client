@@ -31,6 +31,8 @@ private:
                               bool replace_entire_document);
   void handle_daemon_config_get(web::http::http_request request);
   void handle_daemon_config_put(web::http::http_request request);
+  void handle_daemon_restart(web::http::http_request request);
+  void handle_daemon_logs_get(web::http::http_request request);
   void handle_index(web::http::http_request request);
 
   std::string url_;

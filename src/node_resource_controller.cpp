@@ -102,6 +102,190 @@ namespace seeder::nmos_node::internal
     return impl::make_id(seed_id_, nmos::types::receiver, impl::ports::data, id);
   }
 
+  bool NodeResourceController::has_sender_resources(
+      const nmos::id &sender_id,
+      const nmos::id &source_id,
+      const nmos::id &flow_id) const
+  {
+    return node_model_.node_resources.end() !=
+               nmos::find_resource(node_model_.node_resources,
+                                   {source_id, nmos::types::source}) &&
+           node_model_.node_resources.end() !=
+               nmos::find_resource(node_model_.node_resources,
+                                   {flow_id, nmos::types::flow}) &&
+           node_model_.node_resources.end() !=
+               nmos::find_resource(node_model_.node_resources,
+                                   {sender_id, nmos::types::sender}) &&
+           node_model_.connection_resources.end() !=
+               nmos::find_resource(node_model_.connection_resources,
+                                   {sender_id, nmos::types::sender});
+  }
+
+  bool NodeResourceController::ensure_video_sender_resources_for_update(
+      const VideoSender &video, nmos::write_lock &lock)
+  {
+    const auto source_id =
+        impl::make_id(seed_id_, nmos::types::source, impl::ports::video, video.id);
+    const auto flow_id =
+        impl::make_id(seed_id_, nmos::types::flow, impl::ports::video, video.id);
+    const auto sender_id =
+        impl::make_id(seed_id_, nmos::types::sender, impl::ports::video, video.id);
+    if (has_sender_resources(sender_id, source_id, flow_id))
+    {
+      return true;
+    }
+
+    slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
+        << nmos::stash_category(impl::categories::node_implementation)
+        << "video sender resources incomplete before update, rebuilding id:"
+        << video.id;
+    lifecycle_service().erase_sender_resources_if_present(sender_id, source_id,
+                                                          flow_id);
+    stream_store_.remove_sender_resource_ids(sender_id, source_id, flow_id);
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      remove_video_sender_by_sender_id(utility::us2s(sender_id));
+    }
+
+    auto resources = make_video_sender_resources(video);
+    const auto insert_result = lifecycle_service().insert_sender_resources_after(
+        0, std::move(resources.source), std::move(resources.flow),
+        std::move(resources.sender), std::move(resources.connection_sender),
+        *gate_, lock);
+    if (insert_result != ResourceInsertResult::success)
+    {
+      throw node_implementation_init_exception(
+          "rebuild video sender resources failed!");
+    }
+
+    VideoSender rebuilt = video;
+    rebuilt.sender_id = utility::us2s(sender_id);
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      stream_store_.add(std::move(rebuilt));
+    }
+    stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
+    nmos::modify_resource(node_model_.node_resources, device_id_,
+                          ([&](nmos::resource &device)
+                          {
+                            device.data[nmos::fields::senders] =
+                                value_from_elements(stream_store_.sender_ids());
+                            device.data[nmos::fields::version] =
+                                value(nmos::make_version());
+                          }));
+    return false;
+  }
+
+  bool NodeResourceController::ensure_audio_sender_resources_for_update(
+      const AudioSender &audio, nmos::write_lock &lock)
+  {
+    const auto source_id =
+        impl::make_id(seed_id_, nmos::types::source, impl::ports::audio, audio.id);
+    const auto flow_id =
+        impl::make_id(seed_id_, nmos::types::flow, impl::ports::audio, audio.id);
+    const auto sender_id =
+        impl::make_id(seed_id_, nmos::types::sender, impl::ports::audio, audio.id);
+    if (has_sender_resources(sender_id, source_id, flow_id))
+    {
+      return true;
+    }
+
+    slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
+        << nmos::stash_category(impl::categories::node_implementation)
+        << "audio sender resources incomplete before update, rebuilding id:"
+        << audio.id;
+    lifecycle_service().erase_sender_resources_if_present(sender_id, source_id,
+                                                          flow_id);
+    stream_store_.remove_sender_resource_ids(sender_id, source_id, flow_id);
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      remove_audio_sender_by_sender_id(utility::us2s(sender_id));
+    }
+
+    auto resources = make_audio_sender_resources(audio);
+    const auto insert_result = lifecycle_service().insert_sender_resources_after(
+        0, std::move(resources.source), std::move(resources.flow),
+        std::move(resources.sender), std::move(resources.connection_sender),
+        *gate_, lock);
+    if (insert_result != ResourceInsertResult::success)
+    {
+      throw node_implementation_init_exception(
+          "rebuild audio sender resources failed!");
+    }
+
+    AudioSender rebuilt = audio;
+    rebuilt.sender_id = utility::us2s(sender_id);
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      stream_store_.add(std::move(rebuilt));
+    }
+    stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
+    nmos::modify_resource(node_model_.node_resources, device_id_,
+                          ([&](nmos::resource &device)
+                          {
+                            device.data[nmos::fields::senders] =
+                                value_from_elements(stream_store_.sender_ids());
+                            device.data[nmos::fields::version] =
+                                value(nmos::make_version());
+                          }));
+    return false;
+  }
+
+  bool NodeResourceController::ensure_ancillary_sender_resources_for_update(
+      const AncillarySender &ancillary, nmos::write_lock &lock)
+  {
+    const auto source_id =
+        impl::make_id(seed_id_, nmos::types::source, impl::ports::data, ancillary.id);
+    const auto flow_id =
+        impl::make_id(seed_id_, nmos::types::flow, impl::ports::data, ancillary.id);
+    const auto sender_id =
+        impl::make_id(seed_id_, nmos::types::sender, impl::ports::data, ancillary.id);
+    if (has_sender_resources(sender_id, source_id, flow_id))
+    {
+      return true;
+    }
+
+    slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
+        << nmos::stash_category(impl::categories::node_implementation)
+        << "ancillary sender resources incomplete before update, rebuilding id:"
+        << ancillary.id;
+    lifecycle_service().erase_sender_resources_if_present(sender_id, source_id,
+                                                          flow_id);
+    stream_store_.remove_sender_resource_ids(sender_id, source_id, flow_id);
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      remove_ancillary_sender_by_sender_id(utility::us2s(sender_id));
+    }
+
+    auto resources = make_ancillary_sender_resources(ancillary);
+    const auto insert_result = lifecycle_service().insert_sender_resources_after(
+        0, std::move(resources.source), std::move(resources.flow),
+        std::move(resources.sender), std::move(resources.connection_sender),
+        *gate_, lock);
+    if (insert_result != ResourceInsertResult::success)
+    {
+      throw node_implementation_init_exception(
+          "rebuild ancillary sender resources failed!");
+    }
+
+    AncillarySender rebuilt = ancillary;
+    rebuilt.sender_id = utility::us2s(sender_id);
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      stream_store_.add(std::move(rebuilt));
+    }
+    stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
+    nmos::modify_resource(node_model_.node_resources, device_id_,
+                          ([&](nmos::resource &device)
+                          {
+                            device.data[nmos::fields::senders] =
+                                value_from_elements(stream_store_.sender_ids());
+                            device.data[nmos::fields::version] =
+                                value(nmos::make_version());
+                          }));
+    return false;
+  }
+
   void NodeResourceController::replace_sender_resources(
       const std::string &description, SenderResources resources,
       const bool st2022_7)
@@ -737,6 +921,10 @@ namespace seeder::nmos_node::internal
     }
 
     nmos::write_lock lock = node_model_.write_lock();
+    if (!ensure_video_sender_resources_for_update(video, lock))
+    {
+      return;
+    }
     const auto sender_id = impl::make_id(
         seed_id_, nmos::types::sender, impl::ports::video, video.id);
     auto resources = make_video_sender_resources(video);
@@ -764,6 +952,10 @@ namespace seeder::nmos_node::internal
     }
 
     nmos::write_lock lock = node_model_.write_lock();
+    if (!ensure_audio_sender_resources_for_update(audio, lock))
+    {
+      return;
+    }
     const auto sender_id = impl::make_id(
         seed_id_, nmos::types::sender, impl::ports::audio, audio.id);
     auto resources = make_audio_sender_resources(audio);
@@ -791,6 +983,10 @@ namespace seeder::nmos_node::internal
     }
 
     nmos::write_lock lock = node_model_.write_lock();
+    if (!ensure_ancillary_sender_resources_for_update(ancillary, lock))
+    {
+      return;
+    }
     const auto sender_id = impl::make_id(
         seed_id_, nmos::types::sender, impl::ports::data, ancillary.id);
     auto resources = make_ancillary_sender_resources(ancillary);
@@ -880,6 +1076,20 @@ namespace seeder::nmos_node::internal
   void NodeResourceController::replace_video_sender_resources_for_runtime(
       const VideoSender &video)
   {
+    const auto source_id =
+        impl::make_id(seed_id_, nmos::types::source, impl::ports::video, video.id);
+    const auto flow_id =
+        impl::make_id(seed_id_, nmos::types::flow, impl::ports::video, video.id);
+    const auto sender_id =
+        impl::make_id(seed_id_, nmos::types::sender, impl::ports::video, video.id);
+    if (!has_sender_resources(sender_id, source_id, flow_id))
+    {
+      slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
+          << nmos::stash_category(impl::categories::node_implementation)
+          << "runtime interfaces update skipped incomplete video sender id:"
+          << video.id;
+      return;
+    }
     replace_sender_resources("runtime interfaces update video sender",
                              make_video_sender_resources(video),
                              video.redundancy.present);
@@ -888,6 +1098,20 @@ namespace seeder::nmos_node::internal
   void NodeResourceController::replace_audio_sender_resources_for_runtime(
       const AudioSender &audio)
   {
+    const auto source_id =
+        impl::make_id(seed_id_, nmos::types::source, impl::ports::audio, audio.id);
+    const auto flow_id =
+        impl::make_id(seed_id_, nmos::types::flow, impl::ports::audio, audio.id);
+    const auto sender_id =
+        impl::make_id(seed_id_, nmos::types::sender, impl::ports::audio, audio.id);
+    if (!has_sender_resources(sender_id, source_id, flow_id))
+    {
+      slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
+          << nmos::stash_category(impl::categories::node_implementation)
+          << "runtime interfaces update skipped incomplete audio sender id:"
+          << audio.id;
+      return;
+    }
     replace_sender_resources("runtime interfaces update audio sender",
                              make_audio_sender_resources(audio),
                              audio.redundancy.present);
@@ -896,6 +1120,20 @@ namespace seeder::nmos_node::internal
   void NodeResourceController::replace_ancillary_sender_resources_for_runtime(
       const AncillarySender &ancillary)
   {
+    const auto source_id =
+        impl::make_id(seed_id_, nmos::types::source, impl::ports::data, ancillary.id);
+    const auto flow_id =
+        impl::make_id(seed_id_, nmos::types::flow, impl::ports::data, ancillary.id);
+    const auto sender_id =
+        impl::make_id(seed_id_, nmos::types::sender, impl::ports::data, ancillary.id);
+    if (!has_sender_resources(sender_id, source_id, flow_id))
+    {
+      slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
+          << nmos::stash_category(impl::categories::node_implementation)
+          << "runtime interfaces update skipped incomplete ancillary sender id:"
+          << ancillary.id;
+      return;
+    }
     replace_sender_resources("runtime interfaces update ancillary sender",
                              make_ancillary_sender_resources(ancillary),
                              ancillary.redundancy.present);

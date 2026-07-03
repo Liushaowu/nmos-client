@@ -4,3 +4,4 @@ build*
 *.deb
 .omo
 _CPack_Packages
+.sysphus/*

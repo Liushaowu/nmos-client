@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -29,10 +30,14 @@ public:
   void request_stop();
   web::json::value node_settings_json() const;
   web::json::value available_registries_json() const;
+  web::json::value network_interfaces_json() const;
   web::json::value update_node_config(const web::json::value &patch,
                                        bool replace_entire_document);
+  web::json::value write_node_config(const web::json::value &patch,
+                                     bool replace_entire_document);
   web::json::value daemon_config_json() const;
   web::json::value update_daemon_config(const web::json::value &config);
+  void restart_daemon_service();
 
 private:
   void restart_node_runtime();
@@ -71,6 +76,8 @@ private:
   std::chrono::steady_clock::time_point next_sync_not_before_{};
   std::mutex reconcile_mutex_;
   std::string last_node_state_{"stopped"};
+  std::mutex daemon_restart_mutex_;
+  std::chrono::steady_clock::time_point last_daemon_restart_request_{};
 };
 
 }

@@ -384,8 +384,10 @@ namespace seeder
             runtime_interfaces_ = host_interfaces;
           }
         }
+        const auto node_host_interfaces =
+            internal::friendly_named_host_interfaces(host_interfaces);
         const auto interfaces =
-            nmos::experimental::node_interfaces(host_interfaces);
+            nmos::experimental::node_interfaces(node_host_interfaces);
 
 
         // example node
@@ -698,6 +700,11 @@ namespace seeder
         return settings_.discover_registration_apis(settings, *gate_);
       }
 
+      NodeSettingsJson network_interfaces_json() const
+      {
+        return internal::network_interfaces_json();
+      }
+
       void write_persisted_settings(const NodeSettingsJson &settings)
       {
         settings_.write_persisted_settings(settings);
@@ -882,6 +889,10 @@ namespace seeder
     NodeSettingsJson Node::discover_registration_apis() const
     {
       return p_impl->discover_registration_apis();
+    }
+    NodeSettingsJson Node::network_interfaces_json() const
+    {
+      return p_impl->network_interfaces_json();
     }
     void Node::write_persisted_settings(const NodeSettingsJson &settings)
     {

@@ -111,6 +111,7 @@ if ($LASTEXITCODE -ne 0) { throw "nssm install failed with exit code $LASTEXITCO
 & $nssm set $ServiceName AppRotateBytes 10485760 | Out-Null
 & $nssm set $ServiceName Start SERVICE_AUTO_START | Out-Null
 & $nssm set $ServiceName AppStopMethodConsole 15000 | Out-Null
+& $nssm set $ServiceName ObjectName LocalSystem | Out-Null
 
 if ($DelayedAutoStart) {
     sc.exe config $ServiceName start= delayed-auto | Out-Null

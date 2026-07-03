@@ -7,6 +7,7 @@
 #else
 #include <arpa/inet.h>
 #include <ifaddrs.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #endif
@@ -26,6 +27,12 @@
 
 namespace seeder::nmos_node::internal
 {
+  struct NetworkInterface
+  {
+    std::string name;
+    std::string ipv4Address;
+  };
+
   namespace
   {
     std::string to_utf8_string(const utility::string_t &value)
@@ -37,6 +44,120 @@ namespace seeder::nmos_node::internal
     {
       in_addr address{};
       return 1 == inet_pton(AF_INET, value.c_str(), &address);
+    }
+
+    std::vector<NetworkInterface> enumerate_network_interfaces()
+    {
+      std::vector<NetworkInterface> interfaces;
+
+#ifdef _WIN32
+      ULONG buf_len = 15000;
+      std::vector<BYTE> buf(buf_len);
+      auto *adapters = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data());
+
+      ULONG ret = GetAdaptersAddresses(
+          AF_INET,
+          GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
+          nullptr, adapters, &buf_len);
+      if (ERROR_BUFFER_OVERFLOW == ret)
+      {
+        buf.resize(buf_len);
+        adapters = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data());
+        ret = GetAdaptersAddresses(
+            AF_INET,
+            GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
+            nullptr, adapters, &buf_len);
+      }
+      if (NO_ERROR != ret)
+      {
+        return interfaces;
+      }
+
+      for (auto *adapter = adapters; adapter != nullptr; adapter = adapter->Next)
+      {
+        if (IF_TYPE_SOFTWARE_LOOPBACK == adapter->IfType)
+          continue;
+        if (IfOperStatusUp != adapter->OperStatus)
+          continue;
+
+        // Prefer FriendlyName and fall back to AdapterName.
+        std::string friendly_name;
+        if (nullptr != adapter->FriendlyName)
+        {
+          std::wstring friendly(adapter->FriendlyName);
+          int required = WideCharToMultiByte(CP_UTF8, 0, friendly.c_str(), -1,
+                                             nullptr, 0, nullptr, nullptr);
+          if (required > 0)
+          {
+            friendly_name.resize(static_cast<size_t>(required - 1));
+            WideCharToMultiByte(CP_UTF8, 0, friendly.c_str(), -1,
+                                &friendly_name[0], required, nullptr, nullptr);
+          }
+        }
+        if (friendly_name.empty() && nullptr != adapter->AdapterName)
+        {
+          friendly_name = adapter->AdapterName;
+        }
+
+        for (auto *addr = adapter->FirstUnicastAddress; addr != nullptr;
+             addr = addr->Next)
+        {
+          if (AF_INET != addr->Address.lpSockaddr->sa_family)
+            continue;
+
+          char address_buffer[INET_ADDRSTRLEN] = {};
+          const auto *sin = reinterpret_cast<const sockaddr_in *>(
+              addr->Address.lpSockaddr);
+          inet_ntop(AF_INET, &sin->sin_addr, address_buffer,
+                    sizeof(address_buffer));
+
+          std::string ip(address_buffer);
+          if (ip == "0.0.0.0")
+            continue;
+
+          interfaces.push_back({friendly_name, ip});
+        }
+      }
+#else
+      ifaddrs *ifaddr_list = nullptr;
+      if (0 != getifaddrs(&ifaddr_list))
+      {
+        return interfaces;
+      }
+
+      for (auto *iface = ifaddr_list; nullptr != iface; iface = iface->ifa_next)
+      {
+        if (nullptr == iface->ifa_addr || nullptr == iface->ifa_name ||
+            AF_INET != iface->ifa_addr->sa_family)
+        {
+          continue;
+        }
+
+        if (iface->ifa_flags & IFF_LOOPBACK)
+          continue;
+        if (!(iface->ifa_flags & IFF_UP) || !(iface->ifa_flags & IFF_RUNNING))
+          continue;
+
+        char address_buffer[INET_ADDRSTRLEN] = {};
+        const auto *socket_address =
+            reinterpret_cast<const sockaddr_in *>(iface->ifa_addr);
+        if (nullptr == inet_ntop(AF_INET, &socket_address->sin_addr,
+                                 address_buffer, sizeof(address_buffer)))
+        {
+          continue;
+        }
+
+        std::string ip(address_buffer);
+        if (ip == "0.0.0.0")
+          continue;
+
+        interfaces.push_back({iface->ifa_name, ip});
+      }
+
+      freeifaddrs(ifaddr_list);
+#endif
+
+      return interfaces;
     }
 
     std::string resolve_interface_ipv4_address(const std::string &interface_name)
@@ -67,7 +188,7 @@ namespace seeder::nmos_node::internal
 
       for (auto *adapter = adapters; adapter != nullptr; adapter = adapter->Next)
       {
-        // 匹配 AdapterName（如 {GUID}）或 FriendlyName（如 "以太网"）
+        // Match AdapterName or FriendlyName.
         if (nullptr == adapter->AdapterName)
           continue;
         std::string adapter_name(adapter->AdapterName);
@@ -149,7 +270,8 @@ namespace seeder::nmos_node::internal
     }
 
     void set_host_addresses(web::json::value &settings,
-                            const std::vector<std::string> &host_addresses)
+                            const std::vector<std::string> &host_addresses,
+                            const std::string &preferred_host_address = {})
     {
       auto normalized_host_addresses =
           web::json::value::array(host_addresses.size());
@@ -162,8 +284,18 @@ namespace seeder::nmos_node::internal
       settings[utility::s2us("host_addresses")] = normalized_host_addresses;
       if (!host_addresses.empty())
       {
+        std::string selected = host_addresses.front();
+        if (!preferred_host_address.empty())
+        {
+          auto it = std::find(host_addresses.begin(), host_addresses.end(),
+                              preferred_host_address);
+          if (it != host_addresses.end())
+          {
+            selected = preferred_host_address;
+          }
+        }
         settings[utility::s2us("host_address")] = web::json::value::string(
-            utility::s2us(host_addresses.front()));
+            utility::s2us(selected));
       }
     }
 
@@ -211,71 +343,109 @@ namespace seeder::nmos_node::internal
   void apply_interface_host_addresses(web::json::value &settings)
   {
     const auto host_addresses_field = utility::s2us("host_addresses");
+    const auto host_address_field = utility::s2us("host_address");
     const auto interfaces_field = utility::s2us("interfaces");
     if (!settings.is_object())
     {
       return;
     }
 
+    std::string preferred_host_address;
+    if (settings.has_field(host_address_field))
+    {
+      const auto &ha = settings.at(host_address_field);
+      if (ha.is_string())
+      {
+        preferred_host_address = to_utf8_string(ha.as_string());
+      }
+    }
+
     std::vector<std::string> resolved_host_addresses;
+
     if (settings.has_field(host_addresses_field))
     {
       const auto &host_addresses = settings.at(host_addresses_field);
-      if (!host_addresses.is_array())
+      if (host_addresses.is_array())
       {
-        return;
-      }
-
-      for (const auto &host_address : host_addresses.as_array())
-      {
-        if (!host_address.is_string())
+        for (const auto &host_address : host_addresses.as_array())
         {
-          throw std::runtime_error("host_addresses entries must be IPv4 strings");
-        }
+          if (!host_address.is_string())
+          {
+            throw std::runtime_error("host_addresses entries must be IPv4 strings");
+          }
 
-        const auto host_address_text = to_utf8_string(host_address.as_string());
-        if (!is_ipv4_literal(host_address_text))
-        {
-          throw std::runtime_error(
-              "host_addresses entry '" + host_address_text +
-              "' is not a valid IPv4 address; use interfaces for Linux interface names");
-        }
+          const auto host_address_text = to_utf8_string(host_address.as_string());
+          if (!is_ipv4_literal(host_address_text))
+          {
+            throw std::runtime_error(
+                "host_addresses entry '" + host_address_text +
+                "' is not a valid IPv4 address; use interfaces for Linux interface names");
+          }
 
-        append_unique_host_address(resolved_host_addresses, host_address_text);
+          append_unique_host_address(resolved_host_addresses, host_address_text);
+        }
       }
     }
 
     if (settings.has_field(interfaces_field))
     {
       const auto &interface_names = settings.at(interfaces_field);
-      if (!interface_names.is_array())
+      if (interface_names.is_array())
       {
-        return;
-      }
-
-      for (const auto &interface_name : interface_names.as_array())
-      {
-        if (!interface_name.is_string())
+        for (const auto &interface_name : interface_names.as_array())
         {
-          throw std::runtime_error("interfaces entries must be Linux interface names");
-        }
+          if (!interface_name.is_string())
+          {
+            throw std::runtime_error("interfaces entries must be Linux interface names");
+          }
 
-        const auto interface_name_text = to_utf8_string(interface_name.as_string());
-        const auto resolved_address =
-            resolve_interface_ipv4_address(interface_name_text);
-        if (resolved_address.empty())
-        {
-          continue;
-        }
+          const auto interface_name_text = to_utf8_string(interface_name.as_string());
+          const auto resolved_address =
+              resolve_interface_ipv4_address(interface_name_text);
+          if (resolved_address.empty())
+          {
+            continue;
+          }
 
-        append_unique_host_address(resolved_host_addresses, resolved_address);
+          append_unique_host_address(resolved_host_addresses, resolved_address);
+        }
       }
     }
 
     if (!resolved_host_addresses.empty())
     {
-      set_host_addresses(settings, resolved_host_addresses);
+      set_host_addresses(settings, resolved_host_addresses, preferred_host_address);
     }
+  }
+
+  std::vector<web::hosts::experimental::host_interface>
+  friendly_named_host_interfaces(
+      const std::vector<web::hosts::experimental::host_interface> &interfaces)
+  {
+    auto renamed = interfaces;
+    const auto available_interfaces = enumerate_network_interfaces();
+
+    for (auto &host_interface : renamed)
+    {
+      for (const auto &address : host_interface.addresses)
+      {
+        const auto address_text = to_utf8_string(address);
+        const auto match = std::find_if(
+            available_interfaces.begin(), available_interfaces.end(),
+            [&](const NetworkInterface &available) {
+              return available.ipv4Address == address_text &&
+                     !available.name.empty();
+            });
+
+        if (available_interfaces.end() != match)
+        {
+          host_interface.name = utility::s2us(match->name);
+          break;
+        }
+      }
+    }
+
+    return renamed;
   }
 
   web::json::value registration_api_to_json(
@@ -293,6 +463,24 @@ namespace seeder::nmos_node::internal
     object[utility::conversions::to_string_t("port")] =
         web::json::value::number(service.second.port());
     return object;
+  }
+
+  web::json::value network_interfaces_json()
+  {
+    auto interfaces = enumerate_network_interfaces();
+    web::json::value result = web::json::value::array();
+    for (size_t i = 0; i < interfaces.size(); ++i)
+    {
+      web::json::value entry = web::json::value::object();
+      entry[utility::conversions::to_string_t("name")] =
+          web::json::value::string(
+              utility::conversions::to_string_t(interfaces[i].name));
+      entry[utility::conversions::to_string_t("ipv4Address")] =
+          web::json::value::string(
+              utility::conversions::to_string_t(interfaces[i].ipv4Address));
+      result[i] = std::move(entry);
+    }
+    return result;
   }
 
   NodeSettings::NodeSettings(std::string config_file)

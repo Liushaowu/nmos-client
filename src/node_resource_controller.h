@@ -85,6 +85,16 @@ namespace seeder::nmos_node::internal
     nmos::id make_audio_receiver_resource_id(const std::string &id) const;
     nmos::id make_ancillary_receiver_resource_id(const std::string &id) const;
 
+    bool has_sender_resources(const nmos::id &sender_id,
+                              const nmos::id &source_id,
+                              const nmos::id &flow_id) const;
+    bool ensure_video_sender_resources_for_update(const VideoSender &video,
+                                                  nmos::write_lock &lock);
+    bool ensure_audio_sender_resources_for_update(const AudioSender &audio,
+                                                  nmos::write_lock &lock);
+    bool ensure_ancillary_sender_resources_for_update(
+        const AncillarySender &ancillary, nmos::write_lock &lock);
+
     void replace_sender_resources(const std::string &description,
                                   SenderResources resources,
                                   bool st2022_7);

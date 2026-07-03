@@ -4,12 +4,57 @@
 
 #include <chrono>
 #include <cpprest/uri.h>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <stdexcept>
+#include <string>
 #include <thread>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 namespace seeder::nmos_sync {
 
 namespace {
+
+#ifdef _WIN32
+constexpr const char* kServiceName = "nmos-sync-daemon";
+#else
+constexpr const char* kServiceName = "nmos-daemon.service";
+#endif
+constexpr int kRestartDelaySeconds = 2;
+constexpr auto kDaemonRestartCooldown = std::chrono::seconds(60);
+
+#ifdef _WIN32
+std::string powershell_single_quote(const std::string &value) {
+  std::string escaped;
+  escaped.reserve(value.size() + 2);
+  escaped.push_back('\'');
+  for (const auto ch : value) {
+    escaped.push_back(ch);
+    if (ch == '\'') {
+      escaped.push_back('\'');
+    }
+  }
+  escaped.push_back('\'');
+  return escaped;
+}
+
+std::string windows_temp_path() {
+  char buffer[MAX_PATH + 1] = {};
+  const auto length = GetTempPathA(MAX_PATH, buffer);
+  if (0 == length || length > MAX_PATH) {
+    throw std::runtime_error("failed to resolve Windows temp directory");
+  }
+  return std::string(buffer, length);
+}
+#endif
 
 utility::string_t to_t(const std::string &value) {
   return utility::conversions::to_string_t(value);
@@ -21,6 +66,18 @@ std::string to_utf8(const utility::string_t &value) {
 
 web::json::value json_string(const std::string &value) {
   return web::json::value::string(to_t(value));
+}
+
+std::string normalize_registry_version(std::string value) {
+  if (value.size() == 3 && value[0] == '1' && value[1] == '.' &&
+      value[2] >= '0' && value[2] <= '3') {
+    return "v" + value;
+  }
+  if (value.size() == 4 && value[0] == 'v' && value[1] == '1' &&
+      value[2] == '.' && value[3] >= '0' && value[3] <= '3') {
+    return value;
+  }
+  return {};
 }
 
 std::string get_string_or_empty(const web::json::value &object,
@@ -62,10 +119,6 @@ web::json::value selected_registry_summary(const web::json::value &settings) {
       get_int_or_default(settings, "registration_port", 3210));
   object[to_t("registry_version")] =
       json_string(get_string_or_empty(settings, "registry_version"));
-  object[to_t("highest_pri")] = web::json::value::number(
-      get_int_or_default(settings, "highest_pri", 0));
-  object[to_t("lowest_pri")] = web::json::value::number(
-      get_int_or_default(settings, "lowest_pri", 2147483647));
   return object;
 }
 
@@ -104,14 +157,12 @@ void apply_selected_registry_settings(web::json::value &settings) {
     throw std::runtime_error(
         "selected_registry_uri must include /x-nmos/registration/{version}");
   }
-  settings[to_t("registry_version")] = json_string(path.substr(slash + 1));
+  const auto registry_version = normalize_registry_version(path.substr(slash + 1));
+  if (!registry_version.empty()) {
+    settings[to_t("registry_version")] = json_string(registry_version);
+  }
 
-  const bool discovery_enabled =
-      get_bool_or_default(settings, "discovery_enabled", false);
-  settings[to_t("highest_pri")] =
-      web::json::value::number(discovery_enabled ? 0 : 2147483647);
-  settings[to_t("lowest_pri")] = web::json::value::number(2147483647);
-}
+  }
 
 web::json::value merge_objects(const web::json::value &base,
                                const web::json::value &patch) {
@@ -163,6 +214,13 @@ web::json::value App::available_registries_json() const {
   return result;
 }
 
+web::json::value App::network_interfaces_json() const {
+  if (!node_) {
+    throw std::runtime_error("node runtime is not initialized");
+  }
+  return node_->network_interfaces_json();
+}
+
 web::json::value App::update_node_config(const web::json::value &patch,
                                          bool replace_entire_document) {
   if (!node_) {
@@ -194,6 +252,30 @@ web::json::value App::update_node_config(const web::json::value &patch,
     }
     throw;
   }
+
+  web::json::value result = web::json::value::object();
+  result[to_t("persisted")] = next_persisted;
+  result[to_t("effective")] = node_->effective_settings();
+  result[to_t("selected_registry")] = selected_registry_summary(next_persisted);
+  return result;
+}
+
+web::json::value App::write_node_config(const web::json::value &patch,
+                                         bool replace_entire_document) {
+  if (!node_) {
+    throw std::runtime_error("node runtime is not initialized");
+  }
+  if (!patch.is_object()) {
+    throw std::runtime_error("node config payload must be a JSON object");
+  }
+
+  std::lock_guard<std::mutex> lock(node_config_mutex_);
+  const auto previous_persisted = node_->persisted_settings();
+  auto next_persisted =
+      replace_entire_document ? patch : merge_objects(previous_persisted, patch);
+  apply_selected_registry_settings(next_persisted);
+
+  node_->write_persisted_settings(next_persisted);
 
   web::json::value result = web::json::value::object();
   result[to_t("persisted")] = next_persisted;
@@ -539,6 +621,119 @@ void App::set_node_state(const std::string &state) {
         make_node_lifecycle_message(last_node_state_, state));
   }
   last_node_state_ = state;
+}
+
+void App::restart_daemon_service() {
+  {
+    std::lock_guard<std::mutex> lock(daemon_restart_mutex_);
+    const auto now = std::chrono::steady_clock::now();
+    if (last_daemon_restart_request_ != std::chrono::steady_clock::time_point{} &&
+        now - last_daemon_restart_request_ < kDaemonRestartCooldown) {
+      throw std::runtime_error("daemon restart was requested too recently");
+    }
+    last_daemon_restart_request_ = now;
+  }
+
+#ifdef _WIN32
+  const std::string kTaskName = "NMOSSyncDaemonRestart";
+  const auto tempPath = windows_temp_path();
+  const auto scriptPath = tempPath + "nmos_restart.ps1";
+  const auto logPath = tempPath + "nmos_restart.log";
+
+  {
+    std::ofstream script(scriptPath, std::ios::trunc);
+    if (!script) {
+      std::lock_guard<std::mutex> lock(daemon_restart_mutex_);
+      last_daemon_restart_request_ = {};
+      throw std::runtime_error("failed to write Windows service restart script");
+    }
+
+    script << "$ErrorActionPreference = 'Continue'\n"
+           << "$serviceName = " << powershell_single_quote(kServiceName) << "\n"
+           << "$taskName = " << powershell_single_quote(kTaskName) << "\n"
+           << "$log = " << powershell_single_quote(logPath) << "\n"
+           << "function Write-RestartLog($message) { Add-Content -Path $log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $message) }\n"
+           << "try {\n"
+           << "  Write-RestartLog 'RESTART: scheduled; delay=" << kRestartDelaySeconds << "s'\n"
+           << "  Start-Sleep -Seconds " << kRestartDelaySeconds << "\n"
+           << "  Write-RestartLog 'RESTART: stopping service'\n"
+           << "  Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue\n"
+           << "  $deadline = (Get-Date).AddSeconds(45)\n"
+           << "  do {\n"
+           << "    Start-Sleep -Seconds 1\n"
+           << "    $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue\n"
+           << "  } while ($service -and $service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Stopped -and (Get-Date) -lt $deadline)\n"
+           << "  if ($service -and $service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Stopped) { Write-RestartLog ('RESTART: stop wait timed out; status=' + $service.Status) }\n"
+           << "  Write-RestartLog 'RESTART: starting service'\n"
+           << "  Start-Service -Name $serviceName -ErrorAction Stop\n"
+           << "  Start-Sleep -Seconds 2\n"
+           << "  $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue\n"
+           << "  Write-RestartLog ('RESTART: completed; status=' + $(if ($service) { $service.Status } else { 'missing' }))\n"
+           << "} catch {\n"
+           << "  Write-RestartLog ('RESTART: ERROR: ' + $_.Exception.Message)\n"
+           << "  exit 1\n"
+           << "} finally {\n"
+           << "  schtasks /Delete /TN $taskName /F | Out-Null\n"
+           << "  Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue\n"
+           << "}\n";
+  }
+
+  std::string deleteCmd = "schtasks /Delete /TN " + kTaskName + " /F >nul 2>&1";
+  std::system(deleteCmd.c_str());
+
+  std::string createCmd =
+      "schtasks /Create /TN " + kTaskName +
+      " /TR \"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\\"" + scriptPath + "\\\"\""
+      " /RU SYSTEM /SC ONCE /ST 00:00 /F";
+
+  std::cerr << "nmos-sync-daemon restart: creating scheduled task, cmd_len="
+            << createCmd.size() << std::endl;
+
+  int result = std::system(createCmd.c_str());
+  if (result != 0) {
+    std::lock_guard<std::mutex> lock(daemon_restart_mutex_);
+    last_daemon_restart_request_ = {};
+    throw std::runtime_error("failed to create scheduled task for Windows service restart");
+  }
+
+  std::string runCmd = "schtasks /Run /TN " + kTaskName;
+  result = std::system(runCmd.c_str());
+  if (result != 0) {
+    std::lock_guard<std::mutex> lock(daemon_restart_mutex_);
+    last_daemon_restart_request_ = {};
+    throw std::runtime_error("failed to run scheduled task for Windows service restart");
+  }
+#else
+  pid_t pid = fork();
+  if (pid < 0) {
+    std::lock_guard<std::mutex> lock(daemon_restart_mutex_);
+    last_daemon_restart_request_ = {};
+    throw std::runtime_error("failed to fork daemon restart process");
+  }
+  if (pid == 0) {
+    if (setsid() < 0) {
+      _exit(1);
+    }
+    pid_t pid2 = fork();
+    if (pid2 < 0) {
+      _exit(1);
+    }
+    if (pid2 == 0) {
+      std::string cmd = "sleep " + std::to_string(kRestartDelaySeconds) +
+                        " && systemctl restart " + kServiceName;
+      execl("/bin/sh", "sh", "-c", cmd.c_str(), nullptr);
+      _exit(1);
+    }
+    _exit(0);
+  }
+  int status = 0;
+  if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) ||
+      WEXITSTATUS(status) != 0) {
+    std::lock_guard<std::mutex> lock(daemon_restart_mutex_);
+    last_daemon_restart_request_ = {};
+    throw std::runtime_error("failed to schedule Linux service restart");
+  }
+#endif
 }
 
 }

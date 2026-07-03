@@ -59,8 +59,6 @@
         "v1.0"
     ],
     "pri": 100,
-    "highest_pri": 0,
-    "lowest_pri": 2147483647,
     "authorization_highest_pri": 0,
     "authorization_lowest_pri": 2147483647,
     "discovery_backoff_min": 1,
