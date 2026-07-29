@@ -286,15 +286,9 @@
         </div>
 
         <div class="form-group">
-          <label for="daemon-snapshot_url">snapshot_url <span class="required">*</span></label>
-          <input type="text" id="daemon-snapshot_url" data-field="snapshot_url" data-validate="http_url" required>
-          <span class="field-error" data-for="daemon-snapshot_url"></span>
-        </div>
-
-        <div class="form-group">
-          <label for="daemon-ws_url">ws_url <span class="required">*</span></label>
-          <input type="text" id="daemon-ws_url" data-field="ws_url" data-validate="ws_url" required>
-          <span class="field-error" data-for="daemon-ws_url"></span>
+          <label for="daemon-device_server">device_server <span class="required">*</span></label>
+          <input type="text" id="daemon-device_server" data-field="device_server" data-validate="http_url" required>
+          <span class="field-error" data-for="daemon-device_server"></span>
         </div>
 
         <div class="form-group">
@@ -433,12 +427,6 @@ var VALIDATORS = {
     if (!val) return null; // optional
     try { var u = new URL(val); } catch(e) { return 'Invalid URL format'; }
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'Must start with http:// or https://';
-    return null;
-  },
-  ws_url: function(val) {
-    if (!val) return null; // optional
-    try { var u = new URL(val); } catch(e) { return 'Invalid URL format'; }
-    if (u.protocol !== 'ws:' && u.protocol !== 'wss:') return 'Must start with ws:// or wss://';
     return null;
   },
   uuid: function(val) {

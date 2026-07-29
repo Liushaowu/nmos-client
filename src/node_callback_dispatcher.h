@@ -30,10 +30,14 @@ namespace seeder::nmos_node::internal
     void set_update_video_receiver_callback(VideoReceiverCallback func);
     void set_update_audio_receiver_callback(AudioReceiverCallback func);
     void set_update_ancillary_receiver_callback(AncillaryReceiverCallback func);
+    void set_receiver_connection_validation_handler(
+        ReceiverConnectionValidationHandler handler);
     void set_registration_changed_callback(RegistrationChangedCallback func);
 
     SenderCallbacks sender_callbacks() const;
     ReceiverCallbacks receiver_callbacks() const;
+    ReceiverConnectionValidationHandler
+    receiver_connection_validation_handler() const;
     RegistrationChangedCallback registration_changed_callback() const;
 
   private:
@@ -44,6 +48,7 @@ namespace seeder::nmos_node::internal
     VideoReceiverCallback update_video_receiver_func_;
     AudioReceiverCallback update_audio_receiver_func_;
     AncillaryReceiverCallback update_ancillary_receiver_func_;
+    ReceiverConnectionValidationHandler receiver_connection_validation_handler_;
     RegistrationChangedCallback registration_changed_func_;
   };
 }

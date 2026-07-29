@@ -46,6 +46,13 @@ namespace seeder::nmos_node::internal
     update_ancillary_receiver_func_ = std::move(func);
   }
 
+  void CallbackDispatcher::set_receiver_connection_validation_handler(
+      ReceiverConnectionValidationHandler handler)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    receiver_connection_validation_handler_ = std::move(handler);
+  }
+
   void CallbackDispatcher::set_registration_changed_callback(
       RegistrationChangedCallback func)
   {
@@ -65,6 +72,13 @@ namespace seeder::nmos_node::internal
     std::lock_guard<std::mutex> lock(mutex_);
     return {update_video_receiver_func_, update_audio_receiver_func_,
             update_ancillary_receiver_func_};
+  }
+
+  ReceiverConnectionValidationHandler
+  CallbackDispatcher::receiver_connection_validation_handler() const
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return receiver_connection_validation_handler_;
   }
 
   RegistrationChangedCallback CallbackDispatcher::registration_changed_callback() const

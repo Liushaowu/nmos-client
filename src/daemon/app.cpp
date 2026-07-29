@@ -7,7 +7,10 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
+#include <random>
 #include <stdexcept>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -30,6 +33,7 @@ constexpr const char* kServiceName = "nmos-daemon.service";
 #endif
 constexpr int kRestartDelaySeconds = 2;
 constexpr auto kDaemonRestartCooldown = std::chrono::seconds(60);
+const auto kReceiverConnectionResultTimeout = std::chrono::milliseconds(5);
 
 #ifdef _WIN32
 std::string powershell_single_quote(const std::string &value) {
@@ -66,6 +70,16 @@ std::string to_utf8(const utility::string_t &value) {
 
 web::json::value json_string(const std::string &value) {
   return web::json::value::string(to_t(value));
+}
+
+std::string make_validation_request_id() {
+  std::random_device random;
+  std::ostringstream stream;
+  stream << "receiver-validation-" << std::hex << std::setfill('0');
+  for (int i = 0; i < 16; ++i) {
+    stream << std::setw(2) << (random() & 0xff);
+  }
+  return stream.str();
 }
 
 std::string normalize_registry_version(std::string value) {
@@ -293,8 +307,9 @@ web::json::value App::update_daemon_config(const web::json::value &config) {
     throw std::runtime_error("daemon config payload must be a JSON object");
   }
 
-  DaemonConfig::save_to_file(config_path_, config);
-  config_ = DaemonConfig::load_from_file(config_path_);
+  const auto next_config = DaemonConfig::from_json(config);
+  DaemonConfig::save_to_file(config_path_, next_config.to_json());
+  config_ = next_config;
 
   web::json::value result = web::json::value::object();
   result[to_t("restart_required")] = web::json::value::boolean(true);
@@ -327,9 +342,9 @@ int App::run() {
   state_store_.set_daemon_state("starting");
   node_ = std::make_unique<nmos_node::Node>(config_.node_config_path);
   snapshot_client_ =
-      std::make_unique<SnapshotClient>(config_.snapshot_url, config_.pull_timeout_ms);
+      std::make_unique<SnapshotClient>(config_.snapshot_url(), config_.pull_timeout_ms);
   ws_client_ =
-      std::make_unique<WsClient>(config_.ws_url, config_.reconnect_interval_ms,
+      std::make_unique<WsClient>(config_.ws_url(), config_.reconnect_interval_ms,
                                  config_.ws_heartbeat_interval_ms,
                                  config_.ws_heartbeat_timeout_ms);
   http_debug_server_ =
@@ -337,6 +352,9 @@ int App::run() {
 
   node_->set_receiver_event_handler(
       [this](const nmos_node::ReceiverEvent &event) { handle_receiver_event(event); });
+  node_->set_receiver_connection_validation_handler(
+      [this](const nmos_node::ReceiverEvent &event)
+      { validate_receiver_connection(event); });
   node_->set_sender_event_handler(
       [this](const nmos_node::SenderEvent &event) { handle_sender_event(event); });
   node_->set_registration_event_handler(
@@ -605,6 +623,38 @@ void App::handle_receiver_event(const nmos_node::ReceiverEvent &event) {
         } else {
           ws_client_->send_json(
               make_receiver_ancillary_observed_changed_message(payload));
+        }
+      },
+      event.payload);
+}
+
+void App::validate_receiver_connection(const nmos_node::ReceiverEvent &event) {
+  if (!ws_client_ || !ws_client_->is_connected()) {
+    throw std::runtime_error(
+        "websocket is not connected while waiting for receiver connection result");
+  }
+
+  const auto request_id = make_validation_request_id();
+
+  std::visit(
+      [&](const auto &payload) {
+        using Payload = std::decay_t<decltype(payload)>;
+if constexpr (std::is_same_v<Payload, nmos_node::VideoReceiver>) {
+          ws_client_->send_json_and_wait_for_connection_result(
+              make_receiver_video_observed_validation_message(payload, request_id,
+                                                               payload.id),
+              request_id, payload.id, kReceiverConnectionResultTimeout);
+        } else if constexpr (std::is_same_v<Payload, nmos_node::AudioReceiver>) {
+          ws_client_->send_json_and_wait_for_connection_result(
+              make_receiver_audio_observed_validation_message(payload, request_id,
+                                                               payload.id),
+              request_id, payload.id, kReceiverConnectionResultTimeout);
+        } else {
+          ws_client_->send_json_and_wait_for_connection_result(
+              make_receiver_ancillary_observed_validation_message(payload,
+                                                                   request_id,
+                                                                   payload.id),
+              request_id, payload.id, kReceiverConnectionResultTimeout);
         }
       },
       event.payload);

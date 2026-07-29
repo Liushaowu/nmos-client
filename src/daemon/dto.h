@@ -87,6 +87,13 @@ struct SnapshotChangedMessage {
   std::string reason;
 };
 
+struct ConnectionResultMessage {
+  std::string request_id;
+  std::string receiver_id;
+  bool success = false;
+  std::string reason;
+};
+
 struct SyncFailedMessage {
   std::int64_t revision = 0;
   std::string message;
@@ -97,6 +104,9 @@ web::json::value snapshot_to_json(const SnapshotDto &snapshot);
 
 std::optional<SnapshotChangedMessage>
 snapshot_changed_message_from_json(const web::json::value &value);
+
+std::optional<ConnectionResultMessage>
+connection_validation_result_message_from_json(const web::json::value &value);
 
 web::json::value make_node_lifecycle_message(const std::string &old_state,
                                              const std::string &new_state);
@@ -114,6 +124,18 @@ web::json::value make_receiver_audio_observed_changed_message(
     const nmos_node::AudioReceiver &receiver);
 web::json::value make_receiver_ancillary_observed_changed_message(
     const nmos_node::AncillaryReceiver &receiver);
+web::json::value make_receiver_video_observed_validation_message(
+    const nmos_node::VideoReceiver &receiver,
+    const std::string &request_id,
+    const std::string &receiver_id);
+web::json::value make_receiver_audio_observed_validation_message(
+    const nmos_node::AudioReceiver &receiver,
+    const std::string &request_id,
+    const std::string &receiver_id);
+web::json::value make_receiver_ancillary_observed_validation_message(
+    const nmos_node::AncillaryReceiver &receiver,
+    const std::string &request_id,
+    const std::string &receiver_id);
 
 bool equivalent(const nmos_node::Redundancy &lhs,
                const nmos_node::Redundancy &rhs);

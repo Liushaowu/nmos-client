@@ -8,8 +8,7 @@ namespace seeder::nmos_sync {
 
 struct DaemonConfig {
   std::string node_config_path;
-  std::string snapshot_url;
-  std::string ws_url;
+  std::string device_server;
   int pull_timeout_ms = 3000;
   int reconnect_interval_ms = 1000;
   int ws_heartbeat_interval_ms = 5000;
@@ -18,7 +17,10 @@ struct DaemonConfig {
   std::string debug_http_url = "http:/" "/127.0.0.1:8081";
 
   web::json::value to_json() const;
+  std::string snapshot_url() const;
+  std::string ws_url() const;
 
+  static DaemonConfig from_json(const web::json::value &json);
   static DaemonConfig load_from_file(const std::string &file_path);
   static void save_to_file(const std::string &file_path,
                            const web::json::value &json);

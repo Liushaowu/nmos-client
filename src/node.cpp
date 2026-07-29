@@ -2,6 +2,7 @@
 #include "st_fmt.h"
 #include "node_activation_context.h"
 #include "node_callback_dispatcher.h"
+#include "node_connection_validation.h"
 #include "node_connection_transport_params.h"
 #include "node_event_bridge.h"
 #include "nmos/api_utils.h" // for make_api_listener
@@ -194,6 +195,8 @@ namespace seeder
         return nmos::experimental::node_implementation()
             .on_parse_transport_file(
                 make_node_implementation_transport_file_parser())
+            .on_validate_connection_resource_patch(
+                make_node_implementation_connection_resource_patch_validator())
             .on_resolve_auto(
                 make_node_implementation_auto_resolver(node_model_.settings))
             .on_set_transportfile(make_node_implementation_transportfile_setter(
@@ -243,6 +246,17 @@ namespace seeder
       nmos::transport_file_parser make_node_implementation_transport_file_parser()
       {
         return internal::make_transport_file_parser();
+      }
+
+      nmos::details::connection_resource_patch_validator
+      make_node_implementation_connection_resource_patch_validator()
+      {
+        internal::ActivationContext ctx{stream_store_, callbacks_, gate_,
+                                        receiver_mutex_, sender_mutex_, node_id_,
+                                        ptp_domain_number_, runtime_interfaces_,
+                                        runtime_interfaces_mutex_};
+        return internal::make_connection_resource_patch_validator(
+            node_model_.settings, ctx);
       }
 
       // Example Connection API activation callback to resolve "auto" values when
@@ -668,6 +682,13 @@ namespace seeder
         event_bridge_.set_receiver_event_handler(std::move(handler));
       }
 
+      void set_receiver_connection_validation_handler(
+          ReceiverConnectionValidationHandler handler)
+      {
+        event_bridge_.set_receiver_connection_validation_handler(
+            std::move(handler));
+      }
+
       void set_sender_event_handler(SenderEventHandler handler)
       {
         event_bridge_.set_sender_event_handler(std::move(handler));
@@ -869,6 +890,11 @@ namespace seeder
     void Node::set_receiver_event_handler(ReceiverEventHandler handler)
     {
       p_impl->set_receiver_event_handler(std::move(handler));
+    }
+    void Node::set_receiver_connection_validation_handler(
+        ReceiverConnectionValidationHandler handler)
+    {
+      p_impl->set_receiver_connection_validation_handler(std::move(handler));
     }
     void Node::set_sender_event_handler(SenderEventHandler handler)
     {

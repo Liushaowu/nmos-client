@@ -1,11 +1,10 @@
 {
+  "debug_http_url": "http://0.0.0.0:18081",
+  "device_server": "http://192.168.123.198:8081",
   "node_config_path": "node_config_dev.json",
-  "snapshot_url": "http://192.168.123.217/api/data/nmos",
-  "ws_url": "ws://192.168.123.217/ws/nmos",
   "pull_timeout_ms": 3000,
   "reconnect_interval_ms": 1000,
-  "ws_heartbeat_interval_ms": 5000,
-  "ws_heartbeat_timeout_ms": 15000,
   "snapshot_debounce_ms": 300,
-  "debug_http_url": "http://127.0.0.1:18081"
+  "ws_heartbeat_interval_ms": 5000,
+  "ws_heartbeat_timeout_ms": 15000
 }

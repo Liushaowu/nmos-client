@@ -1,7 +1,6 @@
 {
   "node_config_path": "node_config.json",
-  "snapshot_url": "http://127.0.0.1:8080/api/data/nmos",
-  "ws_url": "ws://127.0.0.1:8181/ws/nmos",
+  "device_server": "http://127.0.0.1:8080",
   "pull_timeout_ms": 3000,
   "reconnect_interval_ms": 1000,
   "ws_heartbeat_interval_ms": 5000,

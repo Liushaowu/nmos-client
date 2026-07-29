@@ -141,9 +141,9 @@
 
 ### 5.2 关键差异
 
-当前仓库在安全“接线层”弱于上游常见实践：
+当前仓库在安全“接线层”仍有弱于上游常见实践的部分：
 
-- 未见显式 `on_validate_connection_resource_patch` 接线
+- 2026-07 更新：已接入 `on_validate_connection_resource_patch`，用于 receiver immediate activation 的 websocket 连接确认前置校验
 - 未见完整鉴权验证回调链路接线
 - 线程销毁/停机路径未形成上游等价的生命周期收敛
 

@@ -549,6 +549,27 @@ WS 断开后自动重连。
 **完成定义**
 - video receiver 状态变化能成功回推到外部工程
 
+**连接结果确认**
+- 当 HTTP IS-05 receiver PATCH 请求触发 `activate_immediate` 时，daemon 会在 active 状态变更前等待外部工程通过 WebSocket 返回连接结果
+- 外部工程必须在 5ms 内返回相同 `request_id` 的确认消息：
+
+```json
+{
+  "type": "connection.result",
+  "request_id": "receiver-validation-4f2c9b1a6e0d8c3b7a5f9012d4e6c8b0",
+  "receiver_id": "receiver-1",
+  "success": true,
+  "reason": ""
+}
+```
+
+- `success=false` 时，daemon 会将 `reason` 转换为 nmos-cpp validation 错误，HTTP 400 响应的 debug 字段会携带该原因
+- 超过 5ms 未收到匹配的 `connection.result` 时，daemon 会将超时信息转换为 HTTP 400 validation debug
+- `request_id` 是不可预测的顶层随机字段，用于关联 `receiver.*.observed_changed` 与 `connection.result`
+- `receiver_id` 必须与 validation 请求中的顶层 `receiver_id` 一致，否则该结果会被忽略
+- 跨主机 websocket 必须使用 `wss://`；明文 `ws://` 仅允许本机地址
+- receiver active 变更后的 observed notification 仍会 fire-and-forget 发送，但不携带 `request_id`、不等待、也不抛出
+
 ### Task 8.2：audio receiver 事件转发
 同 Task 8.1，事件类型为：
 - `receiver.audio.observed_changed`

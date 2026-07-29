@@ -26,6 +26,8 @@ namespace seeder::nmos_node::internal
     void set_registration_changed_callback(RegistrationChangedCallback func);
 
     void set_receiver_event_handler(ReceiverEventHandler handler);
+    void set_receiver_connection_validation_handler(
+        ReceiverConnectionValidationHandler handler);
     void set_sender_event_handler(SenderEventHandler handler);
     void set_registration_event_handler(RegistrationEventHandler handler);
 

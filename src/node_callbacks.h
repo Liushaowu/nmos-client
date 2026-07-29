@@ -43,6 +43,8 @@ namespace seeder
     };
 
     using ReceiverEventHandler = std::function<void(const ReceiverEvent &)>;
+    using ReceiverConnectionValidationHandler =
+        std::function<void(const ReceiverEvent &)>;
     using SenderEventHandler = std::function<void(const SenderEvent &)>;
     using RegistrationEventHandler =
         std::function<void(const RegistrationEvent &)>;

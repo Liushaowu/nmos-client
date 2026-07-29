@@ -3,15 +3,21 @@
 #include <cpprest/details/basic_types.h>
 #include <cpprest/ws_client.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <iostream>
-#include <utility>
+#include <stdexcept>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace {
 
 constexpr int default_heartbeat_interval_ms = 5000;
 constexpr int default_heartbeat_timeout_ms = 15000;
+constexpr std::size_t max_text_message_bytes = 1024 * 1024;
+constexpr std::size_t max_connection_reason_bytes = 512;
 
 utility::string_t to_t(const std::string &value) {
   return utility::conversions::to_string_t(value);
@@ -25,9 +31,159 @@ int normalize_interval(int value, int fallback) {
   return value > 0 ? value : fallback;
 }
 
+std::string sanitize_for_error_message(const std::string &text) {
+  std::string result;
+  result.reserve(std::min(text.size(), max_connection_reason_bytes));
+  for (unsigned char ch : text) {
+    if (result.size() >= max_connection_reason_bytes) {
+      break;
+    }
+    result.push_back(std::isprint(ch) ? static_cast<char>(ch) : ' ');
+  }
+  return result;
+}
+
+void log_websocket_message_summary(const web::json::value &json,
+                                   std::size_t body_size) {
+  const auto type_field = to_t("type");
+  const auto request_id_field = to_t("request_id");
+  std::string type;
+  std::string request_id;
+  if (json.is_object() && json.has_field(type_field) &&
+      json.at(type_field).is_string()) {
+    type = to_utf8(json.at(type_field).as_string());
+  }
+  if (json.is_object() && json.has_field(request_id_field) &&
+      json.at(request_id_field).is_string()) {
+    request_id = to_utf8(json.at(request_id_field).as_string());
+  }
+
+  std::cout << "nmos-sync-daemon websocket message: bytes=" << body_size;
+  if (!type.empty()) {
+    std::cout << ", type=" << sanitize_for_error_message(type);
+  }
+  if (!request_id.empty()) {
+    std::cout << ", request_id=" << sanitize_for_error_message(request_id);
+  }
+  std::cout << std::endl;
+}
+
 }
 
 namespace seeder::nmos_sync {
+
+void ConnectionResultWaiter::register_request(std::string request_id,
+                                              std::string receiver_id) {
+  if (request_id.empty()) {
+    throw std::runtime_error("connection result request_id is empty");
+  }
+  if (receiver_id.empty()) {
+    throw std::runtime_error("connection result receiver_id is empty");
+  }
+
+  auto pending = std::make_shared<PendingResult>();
+  pending->receiver_id = std::move(receiver_id);
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (pending_.find(request_id) != pending_.end()) {
+    throw std::runtime_error("connection result request already registered: " +
+                             request_id);
+  }
+  pending_[std::move(request_id)] = std::move(pending);
+}
+
+void ConnectionResultWaiter::remove_request(const std::string &request_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  pending_.erase(request_id);
+}
+
+void ConnectionResultWaiter::complete(const ConnectionResultMessage &message) {
+  std::shared_ptr<PendingResult> pending;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto found = pending_.find(message.request_id);
+    if (found == pending_.end()) {
+      return;
+    }
+    pending = found->second;
+    if (pending->completed || pending->canceled) {
+      return;
+    }
+    if (pending->receiver_id != message.receiver_id) {
+      return;
+    }
+    pending->completed = true;
+    pending->success = message.success;
+    pending->reason = sanitize_for_error_message(message.reason);
+  }
+  pending->cv.notify_all();
+}
+
+void ConnectionResultWaiter::cancel_all(const std::string &reason) {
+  std::vector<std::shared_ptr<PendingResult>> pending_results;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pending_results.reserve(pending_.size());
+    for (auto &entry : pending_) {
+      auto &pending = entry.second;
+      if (pending->completed || pending->canceled) {
+        continue;
+      }
+      pending->canceled = true;
+      pending->reason = sanitize_for_error_message(reason);
+      pending_results.push_back(pending);
+    }
+  }
+
+  for (auto &pending : pending_results) {
+    pending->cv.notify_all();
+  }
+}
+
+void ConnectionResultWaiter::wait_for_result(
+    const std::string &request_id, std::chrono::milliseconds timeout) {
+  std::shared_ptr<PendingResult> pending;
+  std::unique_lock<std::mutex> lock(mutex_);
+  const auto found = pending_.find(request_id);
+  if (found == pending_.end()) {
+    throw std::runtime_error("connection result request not registered: " +
+                             request_id);
+  }
+  pending = found->second;
+
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  const bool ready = pending->cv.wait_until(lock, deadline, [&pending] {
+    return pending->completed || pending->canceled;
+  });
+
+  if (!ready) {
+    pending_.erase(request_id);
+    throw std::runtime_error(std::to_string(timeout.count()) +
+                             "The Device connection timeout occurred!");
+  }
+
+  const bool completed = pending->completed;
+  const bool canceled = pending->canceled;
+  const bool success = pending->success;
+  std::string reason = pending->reason;
+  pending_.erase(request_id);
+  lock.unlock();
+
+  if (completed) {
+    if (success) {
+      return;
+    }
+    if (reason.empty()) {
+      reason = "The destination device refused connection.";
+    }
+    throw std::runtime_error(reason);
+  }
+  if (canceled) {
+    if (reason.empty()) {
+      reason = "The device has disconnected from the connection.";
+    }
+    throw std::runtime_error(reason);
+  }
+}
 
 WsClient::WsClient(std::string ws_url, int reconnect_interval_ms,
                    int heartbeat_interval_ms, int heartbeat_timeout_ms)
@@ -68,6 +224,7 @@ void WsClient::stop() {
 
   log_elapsed("begin");
   stop_requested_ = true;
+  connection_results_.cancel_all("websocket client stopped");
   send_queue_cv_.notify_all();
   std::shared_ptr<web::websockets::client::websocket_callback_client> client;
   {
@@ -123,6 +280,29 @@ bool WsClient::send_json(const web::json::value &message) {
       QueuedMessage{QueuedMessage::Type::text, to_utf8(message.serialize())});
 }
 
+void WsClient::send_json_and_wait_for_connection_result(
+    const web::json::value &message, const std::string &request_id,
+    const std::string &receiver_id, std::chrono::milliseconds timeout) {
+  connection_results_.register_request(request_id, receiver_id);
+  try {
+    if (!send_text_now(to_utf8(message.serialize()))) {
+      connection_results_.remove_request(request_id);
+      throw std::runtime_error(
+          "failed to send connection result request_id " + request_id);
+    }
+  } catch (const std::exception &error) {
+    connection_results_.remove_request(request_id);
+    throw std::runtime_error(
+        "failed to send connection result request_id " + request_id + ": " +
+        error.what());
+  } catch (...) {
+    connection_results_.remove_request(request_id);
+    throw std::runtime_error(
+        "failed to send connection result request_id " + request_id);
+  }
+  connection_results_.wait_for_result(request_id, timeout);
+}
+
 bool WsClient::queue_message(QueuedMessage message) {
   if (!connected_) {
     return false;
@@ -133,6 +313,27 @@ bool WsClient::queue_message(QueuedMessage message) {
     send_queue_.push_back(std::move(message));
   }
   send_queue_cv_.notify_one();
+  return true;
+}
+
+bool WsClient::send_text_now(const std::string &payload) {
+  if (!connected_) {
+    return false;
+  }
+
+  std::shared_ptr<web::websockets::client::websocket_callback_client> client;
+  {
+    std::lock_guard<std::mutex> lock(client_mutex_);
+    client = client_;
+  }
+  if (!client || !connected_) {
+    return false;
+  }
+
+  web::websockets::client::websocket_outgoing_message outgoing;
+  outgoing.set_utf8_message(payload);
+  std::lock_guard<std::mutex> send_lock(send_mutex_);
+  client->send(outgoing).get();
   return true;
 }
 
@@ -165,9 +366,34 @@ void WsClient::run() {
               if (body.empty()) {
                 return;
               }
-              std::cout << "nmos-sync-daemon websocket message: " << body
-                        << std::endl;
+              if (body.size() > max_text_message_bytes) {
+                report_error("websocket message too large");
+                close_active_client();
+                return;
+              }
               auto json = web::json::value::parse(body);
+              log_websocket_message_summary(json, body.size());
+
+              const auto message_type = [&json] {
+                const auto type_field = to_t("type");
+                if (json.is_object() && json.has_field(type_field) &&
+                    json.at(type_field).is_string()) {
+                  return to_utf8(json.at(type_field).as_string());
+                }
+                return std::string{};
+              }();
+              if (message_type == "connection.validation.result") {
+                try {
+                  const auto result = connection_validation_result_message_from_json(json);
+                  if (result.has_value()) {
+                    connection_results_.complete(*result);
+                  }
+                } catch (const std::exception &error) {
+                  report_error(std::string("invalid connection.validation.result message: ") +
+                               sanitize_for_error_message(error.what()));
+                  return;
+                }
+              }
               const auto changed = snapshot_changed_message_from_json(json);
               if (changed.has_value()) {
                 std::function<void(const SnapshotChangedMessage &message)>
@@ -192,6 +418,7 @@ void WsClient::run() {
           [this](web::websockets::client::websocket_close_status,
                  const utility::string_t &, const std::error_code &) {
             connected_ = false;
+            connection_results_.cancel_all("websocket disconnected");
           });
       client->connect(web::uri(to_t(ws_url_))).wait();
       {
@@ -230,6 +457,7 @@ void WsClient::run() {
       send_queue_.clear();
     }
     send_queue_cv_.notify_all();
+    connection_results_.cancel_all("websocket disconnected");
     if (was_connected) {
       std::function<void()> on_disconnected;
       {

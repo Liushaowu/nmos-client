@@ -1,15 +1,27 @@
 #include "node_callback_dispatcher.h"
+#include "node_connection_validation.h"
 #include "node_connection_transport_params.h"
+#include "daemon/dto.h"
+#include "daemon/config.h"
+#include "daemon/ws_client.h"
 #include "node_sdp_service.h"
 #include "node_server_runtime.h"
 #include "node_stream_store.h"
 
 #include <cassert>
 #include <chrono>
+#include <filesystem>
+#include <nmos/activation_mode.h>
+#include <nmos/connection_resources.h>
 #include <nmos/json_fields.h>
+#include <nmos/log_gate.h>
+#include <stdexcept>
+#include <sstream>
 #include <string>
+#include <thread>
 
 using namespace seeder::nmos_node;
+using namespace seeder::nmos_sync;
 
 namespace
 {
@@ -67,6 +79,22 @@ namespace
     assert(called);
   }
 
+  void check_callback_dispatcher_receiver_validation_handler()
+  {
+    internal::CallbackDispatcher dispatcher;
+    bool called = false;
+    dispatcher.set_receiver_connection_validation_handler(
+        [&](const ReceiverEvent &)
+        {
+          called = true;
+        });
+
+    const auto handler = dispatcher.receiver_connection_validation_handler();
+    assert(static_cast<bool>(handler));
+    handler(ReceiverEvent{VideoReceiver{}});
+    assert(called);
+  }
+
   void check_sdp_transport_helpers()
   {
     auto missing_ip = web::json::value::object();
@@ -120,6 +148,527 @@ namespace
     internal::NodeServerRuntime::log_stop_elapsed(
         std::chrono::steady_clock::now(), "smoke");
   }
+
+  void check_connection_result_dto()
+  {
+    auto success = web::json::value::object();
+    success[U("type")] = web::json::value::string(U("connection.validation.result"));
+    success[U("request_id")] = web::json::value::string(U("req-1"));
+    success[U("receiver_id")] = web::json::value::string(U("rx-1"));
+    success[U("success")] = web::json::value::boolean(true);
+
+    const auto parsed_success = connection_validation_result_message_from_json(success);
+    assert(parsed_success.has_value());
+    assert("req-1" == parsed_success->request_id);
+    assert("rx-1" == parsed_success->receiver_id);
+    assert(parsed_success->success);
+    assert(parsed_success->reason.empty());
+
+    auto failure = web::json::value::object();
+    failure[U("type")] = web::json::value::string(U("connection.validation.result"));
+    failure[U("request_id")] = web::json::value::string(U("req-2"));
+    failure[U("receiver_id")] = web::json::value::string(U("rx-2"));
+    failure[U("success")] = web::json::value::boolean(false);
+    failure[U("reason")] = web::json::value::string(U("activation rejected"));
+
+    const auto parsed_failure = connection_validation_result_message_from_json(failure);
+    assert(parsed_failure.has_value());
+    assert(!parsed_failure->success);
+    assert("rx-2" == parsed_failure->receiver_id);
+    assert("activation rejected" == parsed_failure->reason);
+
+    auto ignored = web::json::value::object();
+    ignored[U("type")] = web::json::value::string(U("data.changed"));
+    assert(!connection_validation_result_message_from_json(ignored).has_value());
+
+    auto invalid = web::json::value::object();
+    invalid[U("type")] = web::json::value::string(U("connection.validation.result"));
+    invalid[U("success")] = web::json::value::boolean(true);
+    try
+    {
+      connection_validation_result_message_from_json(invalid);
+      assert(false);
+    }
+    catch (const std::runtime_error &)
+    {
+    }
+
+    VideoReceiver receiver;
+    receiver.id = "rx-1";
+    const auto message = make_receiver_video_observed_validation_message(
+        receiver, "req-3", "rx-1");
+    assert(U("receiver.video.observed_validation") ==
+           message.at(U("type")).as_string());
+    assert(U("req-3") == message.at(U("request_id")).as_string());
+    assert(U("rx-1") == message.at(U("receiver_id")).as_string());
+  }
+
+  void check_connection_result_waiter()
+  {
+    ConnectionResultWaiter waiter;
+    waiter.register_request("req-success", "rx-success");
+    std::thread success_thread([&waiter]
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      waiter.complete(ConnectionResultMessage{"req-success", "rx-success",
+                                              true, {}});
+    });
+    waiter.wait_for_result("req-success", std::chrono::milliseconds(20));
+    success_thread.join();
+
+    waiter.register_request("req-failure", "rx-failure");
+    waiter.complete(
+        ConnectionResultMessage{"req-failure", "rx-failure", false,
+                                "activation rejected"});
+    try
+    {
+      waiter.wait_for_result("req-failure", std::chrono::milliseconds(20));
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("activation rejected") !=
+             std::string::npos);
+    }
+
+    waiter.register_request("req-empty-failure", "rx-empty-failure");
+    waiter.complete(ConnectionResultMessage{"req-empty-failure",
+                                            "rx-empty-failure", false, {}});
+    try
+    {
+      waiter.wait_for_result("req-empty-failure",
+                             std::chrono::milliseconds(20));
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("req-empty-failure") !=
+             std::string::npos);
+    }
+
+    waiter.register_request("req-cancel", "rx-cancel");
+    waiter.cancel_all("websocket disconnected");
+    try
+    {
+      waiter.wait_for_result("req-cancel", std::chrono::milliseconds(20));
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("websocket disconnected") !=
+             std::string::npos);
+    }
+
+    waiter.register_request("req-timeout", "rx-timeout");
+    try
+    {
+      waiter.wait_for_result("req-timeout", std::chrono::milliseconds(1));
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      const std::string message = error.what();
+      assert(message.find("1ms timeout") != std::string::npos);
+      assert(message.find("req-timeout") != std::string::npos);
+    }
+
+    waiter.register_request("req-complete-before-cancel",
+                            "rx-complete-before-cancel");
+    waiter.complete(
+        ConnectionResultMessage{"req-complete-before-cancel",
+                                "rx-complete-before-cancel", true, {}});
+    waiter.cancel_all("websocket disconnected");
+    waiter.wait_for_result("req-complete-before-cancel",
+                           std::chrono::milliseconds(20));
+
+    waiter.register_request("req-failure-before-cancel",
+                            "rx-failure-before-cancel");
+    waiter.complete(ConnectionResultMessage{"req-failure-before-cancel",
+                                            "rx-failure-before-cancel", false,
+                                            "activation rejected"});
+    waiter.cancel_all("websocket disconnected");
+    try
+    {
+      waiter.wait_for_result("req-failure-before-cancel",
+                             std::chrono::milliseconds(20));
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("activation rejected") !=
+             std::string::npos);
+    }
+
+    waiter.register_request("req-first-result-wins", "rx-first-result-wins");
+    waiter.complete(ConnectionResultMessage{"req-first-result-wins",
+                                            "rx-first-result-wins", true, {}});
+    waiter.complete(ConnectionResultMessage{"req-first-result-wins",
+                                            "rx-first-result-wins", false,
+                                            "late failure"});
+    waiter.wait_for_result("req-first-result-wins",
+                           std::chrono::milliseconds(20));
+
+    waiter.register_request("req-duplicate", "rx-duplicate");
+    try
+    {
+      waiter.register_request("req-duplicate", "rx-duplicate");
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("already registered") !=
+             std::string::npos);
+    }
+    waiter.complete(ConnectionResultMessage{"req-duplicate", "rx-duplicate",
+                                            true, {}});
+    waiter.wait_for_result("req-duplicate", std::chrono::milliseconds(20));
+
+    waiter.register_request("req-bound", "rx-bound");
+    waiter.complete(ConnectionResultMessage{"req-bound", "wrong-rx", true, {}});
+    try
+    {
+      waiter.wait_for_result("req-bound", std::chrono::milliseconds(1));
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("1ms timeout") !=
+             std::string::npos);
+    }
+  }
+
+  void check_ws_client_wait_requires_connected_socket()
+  {
+    WsClient client("ws://127.0.0.1:1", 1, 1, 1);
+    try
+    {
+      client.send_json_and_wait_for_connection_result(
+          web::json::value::object(), "req-not-connected",
+          "rx-not-connected", std::chrono::milliseconds(5));
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("req-not-connected") !=
+             std::string::npos);
+    }
+  }
+
+  web::json::value make_daemon_config_with_device_server(
+      const std::string &device_server)
+  {
+    web::json::value config = web::json::value::object();
+    config[U("node_config_path")] = web::json::value::string(U("node.json"));
+    config[U("device_server")] = web::json::value::string(
+        utility::conversions::to_string_t(device_server));
+    return config;
+  }
+
+  web::json::value make_daemon_config_with_old_urls()
+  {
+    web::json::value config = web::json::value::object();
+    config[U("node_config_path")] = web::json::value::string(U("node.json"));
+    config[U("snapshot_url")] =
+        web::json::value::string(U("http://127.0.0.1/api/data/nmos"));
+    config[U("ws_url")] =
+        web::json::value::string(U("ws://127.0.0.1/ws/nmos"));
+    return config;
+  }
+
+  void check_daemon_config_device_server_derivation()
+  {
+    const auto temp = std::filesystem::temp_directory_path();
+    const auto localhost_path = temp / "nmos-daemon-localhost-device.json";
+    const auto remote_https_path = temp / "nmos-daemon-remote-https.json";
+    const auto port_slash_path = temp / "nmos-daemon-port-slash.json";
+
+    DaemonConfig::save_to_file(
+        localhost_path.string(),
+        make_daemon_config_with_device_server("http://127.0.0.1"));
+    const auto localhost_config =
+        DaemonConfig::load_from_file(localhost_path.string());
+    assert("http://127.0.0.1" == localhost_config.device_server);
+    assert("http://127.0.0.1/api/data/nmos" ==
+           localhost_config.snapshot_url());
+    assert("ws://127.0.0.1/ws/nmos" == localhost_config.ws_url());
+
+    DaemonConfig::save_to_file(
+        remote_https_path.string(),
+        make_daemon_config_with_device_server("https://example.com"));
+    const auto remote_https_config =
+        DaemonConfig::load_from_file(remote_https_path.string());
+    assert("https://example.com/api/data/nmos" ==
+           remote_https_config.snapshot_url());
+    assert("wss://example.com/ws/nmos" == remote_https_config.ws_url());
+
+    DaemonConfig::save_to_file(
+        port_slash_path.string(),
+        make_daemon_config_with_device_server("https://example.com:8443/"));
+    const auto port_slash_config =
+        DaemonConfig::load_from_file(port_slash_path.string());
+    assert("https://example.com:8443" == port_slash_config.device_server);
+    assert("https://example.com:8443/api/data/nmos" ==
+           port_slash_config.snapshot_url());
+    assert("wss://example.com:8443/ws/nmos" == port_slash_config.ws_url());
+
+    const auto saved = port_slash_config.to_json();
+    assert(saved.has_field(U("device_server")));
+    assert(!saved.has_field(U("snapshot_url")));
+    assert(!saved.has_field(U("ws_url")));
+
+    try
+    {
+      web::json::value missing_device_server = web::json::value::object();
+      missing_device_server[U("node_config_path")] =
+          web::json::value::string(U("node.json"));
+      DaemonConfig::from_json(missing_device_server);
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("device_server") !=
+             std::string::npos);
+    }
+
+    try
+    {
+      DaemonConfig::from_json(make_daemon_config_with_old_urls());
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("device_server") !=
+             std::string::npos);
+    }
+
+    try
+    {
+      DaemonConfig::from_json(
+          make_daemon_config_with_device_server("ws://127.0.0.1"));
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("http:// or https://") !=
+             std::string::npos);
+    }
+
+    try
+    {
+      DaemonConfig::from_json(
+          make_daemon_config_with_device_server("http:///api"));
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("host") != std::string::npos);
+    }
+
+    try
+    {
+      DaemonConfig::from_json(
+          make_daemon_config_with_device_server("https://example.com/base"));
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("origin") != std::string::npos);
+    }
+  }
+
+  web::json::value make_immediate_receiver_endpoint_staged()
+  {
+    auto endpoint = web::json::value::object();
+    endpoint[nmos::fields::master_enable] = web::json::value::boolean(true);
+    endpoint[nmos::fields::activation][nmos::fields::mode] =
+        web::json::value::string(nmos::activation_modes::activate_immediate.name);
+    endpoint[nmos::fields::transport_params] = web::json::value::array(1);
+    endpoint[nmos::fields::transport_params][0][nmos::fields::interface_ip] =
+        web::json::value::string(U("192.0.2.10"));
+    endpoint[nmos::fields::transport_params][0][nmos::fields::multicast_ip] =
+        web::json::value::string(U("239.1.1.1"));
+    endpoint[nmos::fields::transport_params][0][nmos::fields::destination_port] =
+        web::json::value::number(5004);
+    endpoint[nmos::fields::transport_params][0][nmos::fields::rtp_enabled] =
+        web::json::value::boolean(true);
+    return endpoint;
+  }
+
+  internal::ActivationContext make_validation_context(
+      internal::StreamStore &store,
+      internal::CallbackDispatcher &callbacks,
+      nmos::experimental::log_gate *&gate,
+      std::mutex &receiver_mutex,
+      std::mutex &sender_mutex,
+      nmos::id &node_id,
+      int &ptp_domain_number,
+      RuntimeInterfaces &runtime_interfaces,
+      std::mutex &runtime_interfaces_mutex)
+  {
+    return internal::ActivationContext{store, callbacks, gate, receiver_mutex,
+                                       sender_mutex, node_id,
+                                       ptp_domain_number,
+                                       runtime_interfaces,
+                                       runtime_interfaces_mutex};
+  }
+
+  void check_connection_validator_ignores_sender_resources()
+  {
+    internal::StreamStore store;
+    internal::CallbackDispatcher callbacks;
+    bool called = false;
+    callbacks.set_receiver_connection_validation_handler(
+        [&](const ReceiverEvent &)
+        {
+          called = true;
+        });
+
+    nmos::experimental::log_model log_model;
+    std::ostringstream error_log;
+    std::ostringstream access_log;
+    nmos::experimental::log_gate log_gate(error_log, access_log, log_model);
+    auto *gate_ptr = &log_gate;
+    std::mutex receiver_mutex;
+    std::mutex sender_mutex;
+    std::mutex runtime_interfaces_mutex;
+    RuntimeInterfaces runtime_interfaces;
+    nmos::id node_id = U("node-1");
+    int ptp_domain_number = 127;
+    nmos::settings settings;
+
+    const auto validator = internal::make_connection_resource_patch_validator(
+        settings, make_validation_context(store, callbacks, gate_ptr,
+                                          receiver_mutex, sender_mutex, node_id,
+                                          ptp_domain_number, runtime_interfaces,
+                                          runtime_interfaces_mutex));
+
+    auto sender = nmos::resource(nmos::api_version{1, 3}, nmos::types::sender,
+                                 web::json::value::object(), U("sender-1"),
+                                 true);
+    auto connection_sender = nmos::make_connection_rtp_sender(U("sender-1"), false);
+    validator(sender, connection_sender, make_immediate_receiver_endpoint_staged(),
+              log_gate);
+    assert(!called);
+  }
+
+  void check_connection_validator_rejects_receiver_immediate_activation()
+  {
+    internal::StreamStore store;
+    VideoReceiver receiver;
+    receiver.id = "rx-1";
+    receiver.name = "Receiver 1";
+    store.add(receiver, U("receiver-1"));
+
+    internal::CallbackDispatcher callbacks;
+    bool called = false;
+    callbacks.set_receiver_connection_validation_handler(
+        [&](const ReceiverEvent &event)
+        {
+          called = true;
+          const auto *video = std::get_if<VideoReceiver>(&event.payload);
+          assert(video);
+          assert(video->enable);
+          assert("192.0.2.10" == video->source_ip);
+          assert("239.1.1.1" == video->ip);
+          assert(5004 == video->port);
+          throw std::runtime_error("backend rejected receiver activation");
+        });
+
+    nmos::experimental::log_model log_model;
+    std::ostringstream error_log;
+    std::ostringstream access_log;
+    nmos::experimental::log_gate log_gate(error_log, access_log, log_model);
+    auto *gate_ptr = &log_gate;
+    std::mutex receiver_mutex;
+    std::mutex sender_mutex;
+    std::mutex runtime_interfaces_mutex;
+    RuntimeInterfaces runtime_interfaces;
+    nmos::id node_id = U("node-1");
+    int ptp_domain_number = 127;
+    nmos::settings settings;
+
+    const auto validator = internal::make_connection_resource_patch_validator(
+        settings, make_validation_context(store, callbacks, gate_ptr,
+                                          receiver_mutex, sender_mutex, node_id,
+                                          ptp_domain_number, runtime_interfaces,
+                                          runtime_interfaces_mutex));
+
+    auto receiver_resource = nmos::resource(nmos::api_version{1, 3},
+                                            nmos::types::receiver,
+                                            web::json::value::object(),
+                                            U("receiver-1"), true);
+    auto connection_receiver =
+        nmos::make_connection_rtp_receiver(U("receiver-1"), false);
+    try
+    {
+      validator(receiver_resource, connection_receiver,
+                make_immediate_receiver_endpoint_staged(), log_gate);
+      assert(false);
+    }
+    catch (const web::json::json_exception &error)
+    {
+      assert(called);
+      assert(std::string(error.what()).find(
+                 "backend rejected receiver activation") != std::string::npos);
+    }
+  }
+
+  void check_connection_validator_rejects_invalid_receiver_transport_params()
+  {
+    internal::StreamStore store;
+    VideoReceiver receiver;
+    receiver.id = "rx-1";
+    store.add(receiver, U("receiver-1"));
+
+    internal::CallbackDispatcher callbacks;
+    bool called = false;
+    callbacks.set_receiver_connection_validation_handler(
+        [&](const ReceiverEvent &)
+        {
+          called = true;
+        });
+
+    nmos::experimental::log_model log_model;
+    std::ostringstream error_log;
+    std::ostringstream access_log;
+    nmos::experimental::log_gate log_gate(error_log, access_log, log_model);
+    auto *gate_ptr = &log_gate;
+    std::mutex receiver_mutex;
+    std::mutex sender_mutex;
+    std::mutex runtime_interfaces_mutex;
+    RuntimeInterfaces runtime_interfaces;
+    nmos::id node_id = U("node-1");
+    int ptp_domain_number = 127;
+    nmos::settings settings;
+
+    const auto validator = internal::make_connection_resource_patch_validator(
+        settings, make_validation_context(store, callbacks, gate_ptr,
+                                          receiver_mutex, sender_mutex, node_id,
+                                          ptp_domain_number, runtime_interfaces,
+                                          runtime_interfaces_mutex));
+
+    auto endpoint = make_immediate_receiver_endpoint_staged();
+    endpoint[nmos::fields::transport_params] = web::json::value::object();
+    auto receiver_resource = nmos::resource(nmos::api_version{1, 3},
+                                            nmos::types::receiver,
+                                            web::json::value::object(),
+                                            U("receiver-1"), true);
+    auto connection_receiver =
+        nmos::make_connection_rtp_receiver(U("receiver-1"), false);
+    try
+    {
+      validator(receiver_resource, connection_receiver, endpoint, log_gate);
+      assert(false);
+    }
+    catch (const web::json::json_exception &error)
+    {
+      assert(!called);
+      assert(std::string(error.what()).find("transport_params") !=
+             std::string::npos);
+      assert(std::string(error.what()).find("not an array") !=
+             std::string::npos);
+    }
+  }
 }
 
 int main()
@@ -127,8 +676,16 @@ int main()
   check_stream_store_sender_ids();
   check_stream_store_stream_cache();
   check_callback_dispatcher_snapshots();
+  check_callback_dispatcher_receiver_validation_handler();
   check_sdp_transport_helpers();
   check_connection_handler_helpers();
   check_runtime_helper_linkage();
+  check_connection_result_dto();
+  check_connection_result_waiter();
+  check_ws_client_wait_requires_connected_socket();
+  check_daemon_config_device_server_derivation();
+  check_connection_validator_ignores_sender_resources();
+  check_connection_validator_rejects_receiver_immediate_activation();
+  check_connection_validator_rejects_invalid_receiver_transport_params();
   return 0;
 }

@@ -197,4 +197,5 @@ std::unique_ptr<NodeRuntime> node_runtime_;
 - `Node` 的 PImpl 边界保持不变
 - daemon 的 callback 语义不变（仍然是 variant-based event）
 - `ReconcileEngine` 的 reconcile 逻辑不变
-- `dto.h` 的 `SnapshotDto`、`equivalent`、`make_*_observed_changed_message` 不变
+- `dto.h` 的 `SnapshotDto`、`equivalent` 不变；`make_*_observed_changed_message` 默认兼容旧调用，receiver 消息允许携带用于连接确认的可选 `request_id`
+- receiver 连接确认发生在 nmos-cpp `on_validate_connection_resource_patch` 阶段：HTTP IS-05 receiver immediate activation 在 active 变更前发送带随机 `receiver-validation-*` request_id 和顶层 `receiver_id` 的 observed_changed，外部失败或超时会作为 HTTP 400 debug 原因返回；post-activation observed notification 仅 fire-and-forget

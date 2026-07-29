@@ -7,6 +7,7 @@ set(NMOS_CLIENT_CORE_SOURCES
     node_activation_transport.cpp
     node_activation_transportfile.cpp
     node_callback_dispatcher.cpp
+    node_connection_validation.cpp
     node_connection_transport_params.cpp
     node_event_bridge.cpp
     node_implementation.cpp

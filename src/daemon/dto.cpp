@@ -686,11 +686,27 @@ namespace
   }
 
   template <typename Receiver>
-  value make_receiver_message(const std::string &type_name, const Receiver &receiver,
-                              value (*serializer)(const Receiver &))
+  value make_receiver_changed_message(const std::string &type_name,
+                                      const Receiver &receiver,
+                                      value (*serializer)(const Receiver &))
   {
     value object = value::object();
     object[to_t("type")] = json_string(type_name);
+    object[to_t("payload")] = serializer(receiver);
+    return object;
+  }
+
+  template <typename Receiver>
+  value make_receiver_validation_message(const std::string &type_name,
+                                         const Receiver &receiver,
+                                         value (*serializer)(const Receiver &),
+                                         const std::string &request_id,
+                                         const std::string &receiver_id)
+  {
+    value object = value::object();
+    object[to_t("type")] = json_string(type_name);
+    object[to_t("request_id")] = json_string(request_id);
+    object[to_t("receiver_id")] = json_string(receiver_id);
     object[to_t("payload")] = serializer(receiver);
     return object;
   }
@@ -895,6 +911,33 @@ namespace seeder::nmos_sync
     return message;
   }
 
+  std::optional<ConnectionResultMessage>
+  connection_validation_result_message_from_json(const value &root)
+  {
+    if (!root.is_object() || !root.has_field(to_t("type")))
+    {
+      return std::nullopt;
+    }
+if (get_string_or(root, "type") != "connection.validation.result")
+  {
+    return std::nullopt;
+  }
+
+  require_field(root, to_t("request_id"));
+  require_field(root, to_t("success"));
+
+  ConnectionResultMessage message;
+  message.request_id = get_string_or(root, "request_id");
+  if (message.request_id.empty())
+  {
+    throw std::runtime_error("connection.validation.result request_id is empty");
+  }
+    message.receiver_id = get_string_or(root, "receiver_id");
+    message.success = get_bool_or(root, "success");
+    message.reason = get_string_or(root, "reason");
+    return message;
+  }
+
   web::json::value make_node_lifecycle_message(const std::string &old_state,
                                                const std::string &new_state)
   {
@@ -950,22 +993,52 @@ namespace seeder::nmos_sync
   web::json::value make_receiver_video_observed_changed_message(
       const nmos_node::VideoReceiver &receiver)
   {
-    return make_receiver_message("receiver.video.observed_changed", receiver,
-                                 video_receiver_to_json);
+    return make_receiver_changed_message("receiver.video.observed_changed",
+                                         receiver, video_receiver_to_json);
   }
 
   web::json::value make_receiver_audio_observed_changed_message(
       const nmos_node::AudioReceiver &receiver)
   {
-    return make_receiver_message("receiver.audio.observed_changed", receiver,
-                                 audio_receiver_to_json);
+    return make_receiver_changed_message("receiver.audio.observed_changed",
+                                         receiver, audio_receiver_to_json);
   }
 
   web::json::value make_receiver_ancillary_observed_changed_message(
       const nmos_node::AncillaryReceiver &receiver)
   {
-    return make_receiver_message("receiver.ancillary.observed_changed", receiver,
-                                 ancillary_receiver_to_json);
+    return make_receiver_changed_message("receiver.ancillary.observed_changed",
+                                         receiver, ancillary_receiver_to_json);
+  }
+
+  web::json::value make_receiver_video_observed_validation_message(
+      const nmos_node::VideoReceiver &receiver,
+      const std::string &request_id,
+      const std::string &receiver_id)
+  {
+    return make_receiver_validation_message(
+        "receiver.video.observed_validation", receiver, video_receiver_to_json,
+        request_id, receiver_id);
+  }
+
+  web::json::value make_receiver_audio_observed_validation_message(
+      const nmos_node::AudioReceiver &receiver,
+      const std::string &request_id,
+      const std::string &receiver_id)
+  {
+    return make_receiver_validation_message(
+        "receiver.audio.observed_validation", receiver, audio_receiver_to_json,
+        request_id, receiver_id);
+  }
+
+  web::json::value make_receiver_ancillary_observed_validation_message(
+      const nmos_node::AncillaryReceiver &receiver,
+      const std::string &request_id,
+      const std::string &receiver_id)
+  {
+    return make_receiver_validation_message(
+        "receiver.ancillary.observed_validation", receiver,
+        ancillary_receiver_to_json, request_id, receiver_id);
   }
 
   bool equivalent(const nmos_node::Redundancy &lhs,

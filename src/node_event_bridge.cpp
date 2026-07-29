@@ -69,6 +69,12 @@ namespace seeder::nmos_node::internal
     }
   }
 
+  void NodeEventBridge::set_receiver_connection_validation_handler(
+      ReceiverConnectionValidationHandler handler)
+  {
+    callbacks_.set_receiver_connection_validation_handler(std::move(handler));
+  }
+
   void NodeEventBridge::set_sender_event_handler(SenderEventHandler handler)
   {
     std::lock_guard<std::mutex> lock(event_callback_mutex_);

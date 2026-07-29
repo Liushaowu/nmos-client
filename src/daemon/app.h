@@ -49,6 +49,7 @@ private:
   void handle_ws_error(const std::string &message);
   void handle_sender_event(const nmos_node::SenderEvent &event);
   void handle_receiver_event(const nmos_node::ReceiverEvent &event);
+  void validate_receiver_connection(const nmos_node::ReceiverEvent &event);
   void handle_registration_event(const nmos_node::RegistrationEvent &event);
   void set_node_state(const std::string &state);
 
