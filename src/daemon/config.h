@@ -8,7 +8,8 @@ namespace seeder::nmos_sync {
 
 struct DaemonConfig {
   std::string node_config_path;
-  std::string device_server;
+  std::string device_http_api;
+  std::string device_ws_api;
   int pull_timeout_ms = 3000;
   int reconnect_interval_ms = 1000;
   int ws_heartbeat_interval_ms = 5000;

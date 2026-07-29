@@ -55,18 +55,35 @@ std::string trim_trailing_slashes(std::string value) {
   return value;
 }
 
-std::string normalize_device_server(const std::string &value) {
+std::string normalize_device_http_api(const std::string &value) {
   const auto uri = web::uri(to_t(value));
   if (uri.is_empty() || uri.scheme().empty() || uri.host().empty()) {
     throw std::runtime_error(
-        "device_server must be an absolute HTTP(S) URL with a host");
+        "device_http_api must be an absolute HTTP(S) URL with a host");
   }
   if (uri.scheme() != U("http") && uri.scheme() != U("https")) {
-    throw std::runtime_error("device_server must use http:// or https://");
+    throw std::runtime_error("device_http_api must use http:// or https://");
   }
   if ((!uri.path().empty() && uri.path() != U("/")) ||
       !uri.query().empty() || !uri.fragment().empty()) {
-    throw std::runtime_error("device_server must be an HTTP(S) origin");
+    throw std::runtime_error("device_http_api must be an HTTP(S) origin");
+  }
+
+  return trim_trailing_slashes(to_utf8(uri.to_string()));
+}
+
+std::string normalize_device_ws_api(const std::string &value) {
+  const auto uri = web::uri(to_t(value));
+  if (uri.is_empty() || uri.scheme().empty() || uri.host().empty()) {
+    throw std::runtime_error(
+        "device_ws_api must be an absolute WS(S) URL with a host");
+  }
+  if (uri.scheme() != U("ws") && uri.scheme() != U("wss")) {
+    throw std::runtime_error("device_ws_api must use ws:// or wss://");
+  }
+  if ((!uri.path().empty() && uri.path() != U("/")) ||
+      !uri.query().empty() || !uri.fragment().empty()) {
+    throw std::runtime_error("device_ws_api must be a WS(S) origin");
   }
 
   return trim_trailing_slashes(to_utf8(uri.to_string()));
@@ -84,7 +101,8 @@ web::json::value DaemonConfig::to_json() const {
   web::json::value obj = web::json::value::object();
   obj[to_t("node_config_path")] =
       web::json::value::string(to_t(node_config_path));
-  obj[to_t("device_server")] = web::json::value::string(to_t(device_server));
+  obj[to_t("device_http_api")] = web::json::value::string(to_t(device_http_api));
+  obj[to_t("device_ws_api")] = web::json::value::string(to_t(device_ws_api));
   obj[to_t("pull_timeout_ms")] = web::json::value::number(pull_timeout_ms);
   obj[to_t("reconnect_interval_ms")] =
       web::json::value::number(reconnect_interval_ms);
@@ -100,17 +118,11 @@ web::json::value DaemonConfig::to_json() const {
 }
 
 std::string DaemonConfig::snapshot_url() const {
-  return append_path(device_server, "/api/data/nmos");
+  return append_path(device_http_api, "/api/data/nmos");
 }
 
 std::string DaemonConfig::ws_url() const {
-  if (device_server.rfind("http://", 0) == 0) {
-    return append_path("ws://" + device_server.substr(7), "/ws/nmos");
-  }
-  if (device_server.rfind("https://", 0) == 0) {
-    return append_path("wss://" + device_server.substr(8), "/ws/nmos");
-  }
-  throw std::runtime_error("device_server must use http:// or https://");
+  return append_path(device_ws_api, "/ws/nmos");
 }
 
 void DaemonConfig::save_to_file(const std::string &file_path,
@@ -136,8 +148,10 @@ void DaemonConfig::save_to_file(const std::string &file_path,
 DaemonConfig DaemonConfig::from_json(const web::json::value &json) {
   DaemonConfig config;
   config.node_config_path = require_string(json, "node_config_path");
-  config.device_server = normalize_device_server(
-      require_string(json, "device_server"));
+  config.device_http_api = normalize_device_http_api(
+      require_string(json, "device_http_api"));
+  config.device_ws_api = normalize_device_ws_api(
+      require_string(json, "device_ws_api"));
   config.pull_timeout_ms = get_int_or(json, "pull_timeout_ms", 3000);
   config.reconnect_interval_ms =
       get_int_or(json, "reconnect_interval_ms", 1000);

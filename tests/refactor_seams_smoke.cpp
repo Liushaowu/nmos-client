@@ -354,97 +354,119 @@ namespace
     }
   }
 
-  web::json::value make_daemon_config_with_device_server(
-      const std::string &device_server)
+  web::json::value make_daemon_config_with_device_apis(
+      const std::string &device_http_api, const std::string &device_ws_api)
   {
     web::json::value config = web::json::value::object();
     config[U("node_config_path")] = web::json::value::string(U("node.json"));
-    config[U("device_server")] = web::json::value::string(
-        utility::conversions::to_string_t(device_server));
+    config[U("device_http_api")] = web::json::value::string(
+        utility::conversions::to_string_t(device_http_api));
+    config[U("device_ws_api")] = web::json::value::string(
+        utility::conversions::to_string_t(device_ws_api));
     return config;
   }
 
-  web::json::value make_daemon_config_with_old_urls()
-  {
-    web::json::value config = web::json::value::object();
-    config[U("node_config_path")] = web::json::value::string(U("node.json"));
-    config[U("snapshot_url")] =
-        web::json::value::string(U("http://127.0.0.1/api/data/nmos"));
-    config[U("ws_url")] =
-        web::json::value::string(U("ws://127.0.0.1/ws/nmos"));
-    return config;
-  }
-
-  void check_daemon_config_device_server_derivation()
+  void check_daemon_config_device_apis_derivation()
   {
     const auto temp = std::filesystem::temp_directory_path();
-    const auto localhost_path = temp / "nmos-daemon-localhost-device.json";
-    const auto remote_https_path = temp / "nmos-daemon-remote-https.json";
+    const auto localhost_path = temp / "nmos-daemon-localhost-http-ws.json";
+    const auto remote_path = temp / "nmos-daemon-remote-https-wss.json";
     const auto port_slash_path = temp / "nmos-daemon-port-slash.json";
 
     DaemonConfig::save_to_file(
         localhost_path.string(),
-        make_daemon_config_with_device_server("http://127.0.0.1"));
+        make_daemon_config_with_device_apis("http://127.0.0.1",
+                                                 "ws://127.0.0.1"));
     const auto localhost_config =
         DaemonConfig::load_from_file(localhost_path.string());
-    assert("http://127.0.0.1" == localhost_config.device_server);
+    assert("http://127.0.0.1" == localhost_config.device_http_api);
+    assert("ws://127.0.0.1" == localhost_config.device_ws_api);
     assert("http://127.0.0.1/api/data/nmos" ==
            localhost_config.snapshot_url());
     assert("ws://127.0.0.1/ws/nmos" == localhost_config.ws_url());
 
     DaemonConfig::save_to_file(
-        remote_https_path.string(),
-        make_daemon_config_with_device_server("https://example.com"));
-    const auto remote_https_config =
-        DaemonConfig::load_from_file(remote_https_path.string());
+        remote_path.string(),
+        make_daemon_config_with_device_apis("https://example.com",
+                                                 "wss://example.com"));
+    const auto remote_config =
+        DaemonConfig::load_from_file(remote_path.string());
     assert("https://example.com/api/data/nmos" ==
-           remote_https_config.snapshot_url());
-    assert("wss://example.com/ws/nmos" == remote_https_config.ws_url());
+           remote_config.snapshot_url());
+    assert("wss://example.com/ws/nmos" == remote_config.ws_url());
 
     DaemonConfig::save_to_file(
         port_slash_path.string(),
-        make_daemon_config_with_device_server("https://example.com:8443/"));
+        make_daemon_config_with_device_apis("https://example.com:8443/",
+                                                 "wss://example.com:8443/"));
     const auto port_slash_config =
         DaemonConfig::load_from_file(port_slash_path.string());
-    assert("https://example.com:8443" == port_slash_config.device_server);
+    assert("https://example.com:8443" == port_slash_config.device_http_api);
+    assert("wss://example.com:8443" == port_slash_config.device_ws_api);
     assert("https://example.com:8443/api/data/nmos" ==
            port_slash_config.snapshot_url());
     assert("wss://example.com:8443/ws/nmos" == port_slash_config.ws_url());
 
     const auto saved = port_slash_config.to_json();
-    assert(saved.has_field(U("device_server")));
+    assert(saved.has_field(U("device_http_api")));
+    assert(saved.has_field(U("device_ws_api")));
+    assert(!saved.has_field(U("device_server")));
     assert(!saved.has_field(U("snapshot_url")));
     assert(!saved.has_field(U("ws_url")));
 
     try
     {
-      web::json::value missing_device_server = web::json::value::object();
-      missing_device_server[U("node_config_path")] =
+      web::json::value missing_device_http_api = web::json::value::object();
+      missing_device_http_api[U("node_config_path")] =
           web::json::value::string(U("node.json"));
-      DaemonConfig::from_json(missing_device_server);
+      missing_device_http_api[U("device_ws_api")] =
+          web::json::value::string(U("ws://127.0.0.1"));
+      DaemonConfig::from_json(missing_device_http_api);
       assert(false);
     }
     catch (const std::runtime_error &error)
     {
-      assert(std::string(error.what()).find("device_server") !=
+      assert(std::string(error.what()).find("device_http_api") !=
              std::string::npos);
     }
 
     try
     {
-      DaemonConfig::from_json(make_daemon_config_with_old_urls());
+      web::json::value missing_device_ws_api = web::json::value::object();
+      missing_device_ws_api[U("node_config_path")] =
+          web::json::value::string(U("node.json"));
+      missing_device_ws_api[U("device_http_api")] =
+          web::json::value::string(U("http://127.0.0.1"));
+      DaemonConfig::from_json(missing_device_ws_api);
       assert(false);
     }
     catch (const std::runtime_error &error)
     {
-      assert(std::string(error.what()).find("device_server") !=
+      assert(std::string(error.what()).find("device_ws_api") !=
+             std::string::npos);
+    }
+
+    try
+    {
+      web::json::value old_config = web::json::value::object();
+      old_config[U("node_config_path")] =
+          web::json::value::string(U("node.json"));
+      old_config[U("device_server")] =
+          web::json::value::string(U("http://127.0.0.1"));
+      DaemonConfig::from_json(old_config);
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("device_http_api") !=
              std::string::npos);
     }
 
     try
     {
       DaemonConfig::from_json(
-          make_daemon_config_with_device_server("ws://127.0.0.1"));
+          make_daemon_config_with_device_apis("ws://127.0.0.1",
+                                                   "ws://127.0.0.1"));
       assert(false);
     }
     catch (const std::runtime_error &error)
@@ -456,7 +478,21 @@ namespace
     try
     {
       DaemonConfig::from_json(
-          make_daemon_config_with_device_server("http:///api"));
+          make_daemon_config_with_device_apis("http://127.0.0.1",
+                                                   "http://127.0.0.1"));
+      assert(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+      assert(std::string(error.what()).find("ws:// or wss://") !=
+             std::string::npos);
+    }
+
+    try
+    {
+      DaemonConfig::from_json(
+          make_daemon_config_with_device_apis("http:///api",
+                                                   "ws://127.0.0.1"));
       assert(false);
     }
     catch (const std::runtime_error &error)
@@ -467,7 +503,8 @@ namespace
     try
     {
       DaemonConfig::from_json(
-          make_daemon_config_with_device_server("https://example.com/base"));
+          make_daemon_config_with_device_apis("https://example.com/base",
+                                                   "wss://example.com"));
       assert(false);
     }
     catch (const std::runtime_error &error)
@@ -683,7 +720,7 @@ int main()
   check_connection_result_dto();
   check_connection_result_waiter();
   check_ws_client_wait_requires_connected_socket();
-  check_daemon_config_device_server_derivation();
+  check_daemon_config_device_apis_derivation();
   check_connection_validator_ignores_sender_resources();
   check_connection_validator_rejects_receiver_immediate_activation();
   check_connection_validator_rejects_invalid_receiver_transport_params();
