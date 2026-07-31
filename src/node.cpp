@@ -73,27 +73,11 @@
 #include "nmos/lldp_manager.h"
 #include "lldp/lldp_manager.h"
 #endif
-#include <nmos/id.h>
-#include <nmos/mutex.h>
 using web::json::value;
 using web::json::value_from_elements;
 using web::json::value_of;
 
 const unsigned int delay_millis{0};
-
-nmos::interlace_mode get_interlace_mode(int fps_numerator, int fps_denominator,
-                                        int height)
-{
-  const auto frame_rate = nmos::parse_rational(
-      web::json::value_of({{nmos::fields::numerator, fps_numerator},
-                           {nmos::fields::denominator, fps_denominator}}));
-  const auto frame_height = height;
-  return (nmos::rates::rate25 == frame_rate ||
-          nmos::rates::rate29_97 == frame_rate) &&
-                 1080 == frame_height
-             ? nmos::interlace_modes::interlaced_tff
-             : nmos::interlace_modes::progressive;
-}
 
 namespace seeder
 {
@@ -209,11 +193,14 @@ namespace seeder
 
       nmos::registration_handler make_node_implementation_registration_handler()
       {
-        internal::ActivationContext ctx{stream_store_, callbacks_, gate_,
-                                        receiver_mutex_, sender_mutex_, node_id_,
-                                        ptp_domain_number_, runtime_interfaces_,
-                                        runtime_interfaces_mutex_};
-        return internal::make_registration_handler(ctx);
+        return internal::make_registration_handler(make_activation_context());
+      }
+
+      internal::ActivationContext make_activation_context()
+      {
+        return {stream_store_, callbacks_, gate_, receiver_mutex_,
+                sender_mutex_, node_id_, ptp_domain_number_,
+                runtime_interfaces_, runtime_interfaces_mutex_};
       }
 
       nmos::id make_video_receiver_resource_id(const std::string &id) const
@@ -236,11 +223,7 @@ namespace seeder
       nmos::connection_activation_handler
       make_node_implementation_connection_activation_handler()
       {
-        internal::ActivationContext ctx{stream_store_, callbacks_, gate_,
-                                        receiver_mutex_, sender_mutex_, node_id_,
-                                        ptp_domain_number_, runtime_interfaces_,
-                                        runtime_interfaces_mutex_};
-        return internal::make_activation_handler(ctx);
+        return internal::make_activation_handler(make_activation_context());
       }
 
       nmos::transport_file_parser make_node_implementation_transport_file_parser()
@@ -251,12 +234,8 @@ namespace seeder
       nmos::details::connection_resource_patch_validator
       make_node_implementation_connection_resource_patch_validator()
       {
-        internal::ActivationContext ctx{stream_store_, callbacks_, gate_,
-                                        receiver_mutex_, sender_mutex_, node_id_,
-                                        ptp_domain_number_, runtime_interfaces_,
-                                        runtime_interfaces_mutex_};
         return internal::make_connection_resource_patch_validator(
-            node_model_.settings, ctx);
+            node_model_.settings, make_activation_context());
       }
 
       // Example Connection API activation callback to resolve "auto" values when
@@ -264,22 +243,15 @@ namespace seeder
       nmos::connection_resource_auto_resolver
       make_node_implementation_auto_resolver(const nmos::settings &settings)
       {
-        internal::ActivationContext ctx{stream_store_, callbacks_, gate_,
-                                        receiver_mutex_, sender_mutex_, node_id_,
-                                        ptp_domain_number_, runtime_interfaces_,
-                                        runtime_interfaces_mutex_};
-        return internal::make_auto_resolver(settings, ctx);
+        return internal::make_auto_resolver(settings, make_activation_context());
       }
 
       nmos::connection_sender_transportfile_setter
       make_node_implementation_transportfile_setter(
           const nmos::resources &node_resources, const nmos::settings &settings)
       {
-        internal::ActivationContext ctx{stream_store_, callbacks_, gate_,
-                                        receiver_mutex_, sender_mutex_, node_id_,
-                                        ptp_domain_number_, runtime_interfaces_,
-                                        runtime_interfaces_mutex_};
-        return internal::make_transportfile_setter(node_resources, settings, ctx);
+        return internal::make_transportfile_setter(node_resources, settings,
+                                                   make_activation_context());
       }
 
       bool insert_resource_after(unsigned int milliseconds,

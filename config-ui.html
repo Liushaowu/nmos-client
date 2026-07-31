@@ -453,10 +453,6 @@ var VALIDATORS = {
     return null;
   },
   registration: function(val) {
-    var mode = document.getElementById('node-registry_mode').value;
-    if (mode === 'mdns' && (!val || !_selectedRegistryUri)) {
-      return 'Please select a discovered registration';
-    }
     return null;
   },
   port: function(val) {
@@ -1050,24 +1046,20 @@ function registryModeChanged() {
     addrInput.required = false;
     portInput.readOnly = true;
     portInput.required = false;
-    regGroup.style.display = '';
-    regSel.disabled = false;
-
-    if (_registrations.length > 0) {
-      var idx = parseInt(regSel.value, 10);
-      if (!isNaN(idx) && idx >= 0 && idx < _registrations.length) {
-        backfillFromRegistration(_registrations[idx]);
-        _selectedRegistryUri = _registrations[idx].uri;
-      }
-    } else {
-      loadRegistrations();
-    }
+    regGroup.style.display = 'none';
+    addrInput.parentNode.style.display = 'none';
+    portInput.parentNode.style.display = 'none';
+    _selectedRegistryUri = null;
+    addrInput.value = '';
+    portInput.value = '';
   } else {
     addrInput.readOnly = false;
     addrInput.required = true;
     portInput.readOnly = false;
     portInput.required = true;
     regGroup.style.display = 'none';
+    addrInput.parentNode.style.display = '';
+    portInput.parentNode.style.display = '';
     _selectedRegistryUri = null;
     validateField(regSel);
   }
@@ -1091,14 +1083,18 @@ function setupRegistryUI() {
     addrInput.required = false;
     portInput.readOnly = true;
     portInput.required = false;
-    regGroup.style.display = '';
-    loadRegistrations();
+    regGroup.style.display = 'none';
+    addrInput.parentNode.style.display = 'none';
+    portInput.parentNode.style.display = 'none';
+    _selectedRegistryUri = null;
   } else {
     addrInput.readOnly = false;
     addrInput.required = true;
     portInput.readOnly = false;
     portInput.required = true;
     regGroup.style.display = 'none';
+    addrInput.parentNode.style.display = '';
+    portInput.parentNode.style.display = '';
     _selectedRegistryUri = null;
     validateField(document.getElementById('node-registration'));
   }
@@ -1314,10 +1310,6 @@ function loadNodeConfig() {
 
 function saveNodeConfig() {
   var fullPayload = collectForm('node-form');
-  if (fullPayload.registry_mode === 'mdns' && !_selectedRegistryUri) {
-    validateField(document.getElementById('node-registration'));
-    return Promise.reject(new Error('No registration selected'));
-  }
   var patchPayload = {};
   for (var i = 0; i < NODE_WHITELIST.length; i++) {
     var key = NODE_WHITELIST[i];
@@ -1325,8 +1317,10 @@ function saveNodeConfig() {
       patchPayload[key] = fullPayload[key];
     }
   }
-  if (fullPayload.registry_mode === 'mdns' && _selectedRegistryUri) {
-    patchPayload.selected_registry_uri = _selectedRegistryUri;
+  if (fullPayload.registry_mode === 'mdns') {
+    delete patchPayload.registry_address;
+    delete patchPayload.registration_port;
+    delete patchPayload.selected_registry_uri;
   }
   return fetch('/api/nmos/settings/update', {
     method: 'PATCH',

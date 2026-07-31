@@ -1,11 +1,1 @@
-{
-  "debug_http_url": "http://0.0.0.0:18081",
-  "device_http_api": "http://192.168.123.198:8081",
-  "device_ws_api": "ws://192.168.123.198:8181",
-  "node_config_path": "node_config_dev.json",
-  "pull_timeout_ms": 3000,
-  "reconnect_interval_ms": 1000,
-  "snapshot_debounce_ms": 300,
-  "ws_heartbeat_interval_ms": 5000,
-  "ws_heartbeat_timeout_ms": 15000
-}
+{"debug_http_url":"http://0.0.0.0:18081","device_http_api":"http://192.168.123.198:8081","device_ws_api":"ws://192.168.123.198:8181","node_config_path":"node_config_dev.json","pull_timeout_ms":3000,"reconnect_interval_ms":1000,"snapshot_debounce_ms":300,"ws_heartbeat_interval_ms":5000,"ws_heartbeat_timeout_ms":15000}

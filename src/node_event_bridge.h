@@ -32,9 +32,8 @@ namespace seeder::nmos_node::internal
     void set_registration_event_handler(RegistrationEventHandler handler);
 
   private:
-    void publish_event(const ReceiverEvent &event);
-    void publish_event(const SenderEvent &event);
-    void publish_event(const RegistrationEvent &event);
+    template <typename Event, typename Handler>
+    void publish_event_impl(const Event &event, Handler &handler_store);
 
     CallbackDispatcher &callbacks_;
     ReceiverEventHandler receiver_event_handler_;

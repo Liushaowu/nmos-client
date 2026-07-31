@@ -136,6 +136,22 @@ web::json::value selected_registry_summary(const web::json::value &settings) {
   return object;
 }
 
+void apply_mdns_cleanup(web::json::value &settings) {
+  if (!settings.is_object()) {
+    return;
+  }
+
+  const auto registry_mode_field = to_t("registry_mode");
+  if (!settings.has_field(registry_mode_field) ||
+      !settings.at(registry_mode_field).is_string() ||
+      to_utf8(settings.at(registry_mode_field).as_string()) != "mdns") {
+    return;
+  }
+
+  settings.as_object().erase(to_t("registry_address"));
+  settings.as_object().erase(to_t("registration_port"));
+}
+
 void apply_selected_registry_settings(web::json::value &settings) {
   if (!settings.is_object()) {
     throw std::runtime_error("node config payload must be a JSON object");
@@ -249,6 +265,7 @@ web::json::value App::update_node_config(const web::json::value &patch,
   auto next_persisted =
       replace_entire_document ? patch : merge_objects(previous_persisted, patch);
   apply_selected_registry_settings(next_persisted);
+  apply_mdns_cleanup(next_persisted);
 
   node_->write_persisted_settings(next_persisted);
   try {
@@ -288,6 +305,7 @@ web::json::value App::write_node_config(const web::json::value &patch,
   auto next_persisted =
       replace_entire_document ? patch : merge_objects(previous_persisted, patch);
   apply_selected_registry_settings(next_persisted);
+  apply_mdns_cleanup(next_persisted);
 
   node_->write_persisted_settings(next_persisted);
 

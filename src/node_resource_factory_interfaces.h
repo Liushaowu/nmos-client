@@ -52,7 +52,7 @@ namespace seeder::nmos_node::internal::resource_factory_detail
     return RuntimeInterfaceLeg{interface, ip, true};
   }
 
-  inline RuntimeInterfaceLeg select_runtime_interface_leg(
+  inline RuntimeInterfaceLeg find_interface_by_exact_address(
       const std::vector<web::hosts::experimental::host_interface> &interfaces,
       const std::string &configured_ip)
   {
@@ -63,6 +63,16 @@ namespace seeder::nmos_node::internal::resource_factory_detail
         return make_runtime_interface_leg(interface, configured_ip);
       }
     }
+    return RuntimeInterfaceLeg{};
+  }
+
+  inline RuntimeInterfaceLeg select_runtime_interface_leg(
+      const std::vector<web::hosts::experimental::host_interface> &interfaces,
+      const std::string &configured_ip)
+  {
+    if (auto leg = find_interface_by_exact_address(interfaces, configured_ip);
+        leg.selected)
+      return leg;
     for (const auto &interface : interfaces)
     {
       if (!interface.addresses.empty())
@@ -82,13 +92,9 @@ namespace seeder::nmos_node::internal::resource_factory_detail
       const std::vector<web::hosts::experimental::host_interface> &interfaces,
       const std::string &configured_ip, const RuntimeInterfaceLeg &primary)
   {
-    for (const auto &interface : interfaces)
-    {
-      if (interface_has_address(interface, configured_ip))
-      {
-        return make_runtime_interface_leg(interface, configured_ip);
-      }
-    }
+    if (auto leg = find_interface_by_exact_address(interfaces, configured_ip);
+        leg.selected)
+      return leg;
     for (const auto &interface : interfaces)
     {
       if (!interface.addresses.empty() &&

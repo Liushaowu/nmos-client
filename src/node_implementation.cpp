@@ -1,11 +1,6 @@
 #include "node_implementation.h"
 
 namespace impl {
-// nmos::interlace_mode get_interlace_mode(enum video_format video_format) {
-//   return st_app_get_interlaced(video_format)
-//              ? nmos::interlace_modes::interlaced_tff
-//              : nmos::interlace_modes::progressive;
-// }
 
 bool is_rtp_port(const impl::port &port) {
   return impl::ports::rtp.end() != boost::range::find(impl::ports::rtp, port);
@@ -60,25 +55,6 @@ utility::string_t make_source_specific_multicast_address_v4(const nmos::id &id,
   a[2] |= 1;
   return utility::s2us(boost::asio::ip::address_v4(a).to_string());
 }
-
-// add a selection of parents to a source or flow
-// void insert_parents(nmos::resource &resource, const nmos::id &seed_id,
-//                     const port &port, int index) {
-//   // algorithm to produce signal ancestry with a range of depths and breadths
-//   // see https://github.com/sony/nmos-cpp/issues/312#issuecomment-1335641637
-//   int b = 0;
-//   while (index & (1 << b))
-//     ++b;
-//   if (!b)
-//     return;
-//   index &= ~(1 << (b - 1));
-//   do {
-//     index &= ~(1 << b);
-//     web::json::push_back(resource.data[nmos::fields::parents],
-//                          impl::make_id(seed_id, resource.type, port, index));
-//     ++b;
-//   } while (index & (1 << b));
-// }
 
 // add a helpful suffix to the label of a sub-resource for the example node
 void set_label_description(nmos::resource &resource, const impl::port &port,

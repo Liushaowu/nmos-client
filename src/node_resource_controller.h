@@ -1,5 +1,6 @@
 #pragma once
 
+#include "node_media_traits.h"
 #include "node_resource_factory.h"
 #include "node_resource_lifecycle.h"
 #include "node_activation_context.h"
@@ -69,31 +70,33 @@ namespace seeder::nmos_node::internal
     NodeResourceFactory make_resource_factory() const;
     ResourceLifecycleService lifecycle_service() const;
 
-    SenderResources make_video_sender_resources(const VideoSender &video) const;
-    SenderResources make_audio_sender_resources(const AudioSender &audio) const;
-    SenderResources make_ancillary_sender_resources(
-        const AncillarySender &ancillary) const;
+    // ---- template implementations (one per operation, dispatched by Tag) ----
+    template <typename Tag>
+    void add_sender_impl(typename MediaTraits<Tag>::Sender sender);
+    template <typename Tag>
+    void remove_sender_impl(std::string id);
+    template <typename Tag>
+    void update_sender_impl(typename MediaTraits<Tag>::Sender sender);
+    template <typename Tag>
+    void add_receiver_impl(typename MediaTraits<Tag>::Receiver receiver);
+    template <typename Tag>
+    void remove_receiver_impl(std::string id);
+    template <typename Tag>
+    void update_receiver_impl(typename MediaTraits<Tag>::Receiver receiver);
+    template <typename Tag>
+    bool ensure_sender_resources_for_update_impl(
+        const typename MediaTraits<Tag>::Sender &item, nmos::write_lock &lock);
+    template <typename Tag>
+    void replace_sender_resources_for_runtime_impl(
+        const typename MediaTraits<Tag>::Sender &item);
+    template <typename Tag>
+    void replace_receiver_resources_for_runtime_impl(
+        const typename MediaTraits<Tag>::Receiver &item);
 
-    ReceiverResources make_video_receiver_resources(
-        const VideoReceiver &video) const;
-    ReceiverResources make_audio_receiver_resources(
-        const AudioReceiver &audio) const;
-    ReceiverResources make_ancillary_receiver_resources(
-        const AncillaryReceiver &ancillary) const;
-
-    nmos::id make_video_receiver_resource_id(const std::string &id) const;
-    nmos::id make_audio_receiver_resource_id(const std::string &id) const;
-    nmos::id make_ancillary_receiver_resource_id(const std::string &id) const;
-
+    // ---- helpers shared by template impls ----
     bool has_sender_resources(const nmos::id &sender_id,
                               const nmos::id &source_id,
                               const nmos::id &flow_id) const;
-    bool ensure_video_sender_resources_for_update(const VideoSender &video,
-                                                  nmos::write_lock &lock);
-    bool ensure_audio_sender_resources_for_update(const AudioSender &audio,
-                                                  nmos::write_lock &lock);
-    bool ensure_ancillary_sender_resources_for_update(
-        const AncillarySender &ancillary, nmos::write_lock &lock);
 
     void replace_sender_resources(const std::string &description,
                                   SenderResources resources,
@@ -102,6 +105,7 @@ namespace seeder::nmos_node::internal
                                     ReceiverResources resources,
                                     bool st2022_7);
 
+    // ---- thin StreamStore pass-throughs (kept for readability) ----
     VideoSender *find_video_sender_by_id(std::string id);
     AudioSender *find_audio_sender_by_id(std::string id);
     AncillarySender *find_ancillary_sender_by_id(std::string id);

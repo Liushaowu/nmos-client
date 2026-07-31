@@ -13,6 +13,167 @@ using web::json::value_from_elements;
 
 namespace seeder::nmos_node::internal
 {
+  // ============================================================
+  // StreamStore accessor — dispatches to the right per-type method
+  // ============================================================
+  namespace
+  {
+    template <typename Tag>
+    struct StoreAccessor;
+
+    template <>
+    struct StoreAccessor<VideoTag>
+    {
+      static auto *find_sender(StreamStore &s, const std::string &id)
+      {
+        return s.find_video_sender_by_id(id);
+      }
+      static void add_sender(StreamStore &s, VideoSender v)
+      {
+        s.add(std::move(v));
+      }
+      static void replace_sender(StreamStore &s, const VideoSender &v)
+      {
+        s.replace(v);
+      }
+      static void remove_sender(StreamStore &s, const std::string &id)
+      {
+        s.remove_video_sender_by_sender_id(id);
+      }
+      static auto *find_receiver(StreamStore &s, const std::string &id)
+      {
+        return s.find_video_receiver_by_id(id);
+      }
+      static void add_receiver(StreamStore &s, VideoReceiver r,
+                               const nmos::id &rid)
+      {
+        s.add(std::move(r), rid);
+      }
+      static void replace_receiver(StreamStore &s, const VideoReceiver &r)
+      {
+        s.replace(r);
+      }
+      static void remove_receiver(StreamStore &s, const std::string &id)
+      {
+        s.remove_video_receiver_by_id(id);
+      }
+    };
+
+    template <>
+    struct StoreAccessor<AudioTag>
+    {
+      static auto *find_sender(StreamStore &s, const std::string &id)
+      {
+        return s.find_audio_sender_by_id(id);
+      }
+      static void add_sender(StreamStore &s, AudioSender v)
+      {
+        s.add(std::move(v));
+      }
+      static void replace_sender(StreamStore &s, const AudioSender &v)
+      {
+        s.replace(v);
+      }
+      static void remove_sender(StreamStore &s, const std::string &id)
+      {
+        s.remove_audio_sender_by_sender_id(id);
+      }
+      static auto *find_receiver(StreamStore &s, const std::string &id)
+      {
+        return s.find_audio_receiver_by_id(id);
+      }
+      static void add_receiver(StreamStore &s, AudioReceiver r,
+                               const nmos::id &rid)
+      {
+        s.add(std::move(r), rid);
+      }
+      static void replace_receiver(StreamStore &s, const AudioReceiver &r)
+      {
+        s.replace(r);
+      }
+      static void remove_receiver(StreamStore &s, const std::string &id)
+      {
+        s.remove_audio_receiver_by_id(id);
+      }
+    };
+
+    template <>
+    struct StoreAccessor<AncillaryTag>
+    {
+      static auto *find_sender(StreamStore &s, const std::string &id)
+      {
+        return s.find_ancillary_sender_by_id(id);
+      }
+      static void add_sender(StreamStore &s, AncillarySender v)
+      {
+        s.add(std::move(v));
+      }
+      static void replace_sender(StreamStore &s, const AncillarySender &v)
+      {
+        s.replace(v);
+      }
+      static void remove_sender(StreamStore &s, const std::string &id)
+      {
+        s.remove_ancillary_sender_by_sender_id(id);
+      }
+      static auto *find_receiver(StreamStore &s, const std::string &id)
+      {
+        return s.find_ancillary_receiver_by_id(id);
+      }
+      static void add_receiver(StreamStore &s, AncillaryReceiver r,
+                               const nmos::id &rid)
+      {
+        s.add(std::move(r), rid);
+      }
+      static void replace_receiver(StreamStore &s, const AncillaryReceiver &r)
+      {
+        s.replace(r);
+      }
+      static void remove_receiver(StreamStore &s, const std::string &id)
+      {
+        s.remove_ancillary_receiver_by_id(id);
+      }
+    };
+
+    // ---- factory dispatch helpers ----
+
+    template <typename Tag>
+    SenderResources make_sender_resources(const NodeResourceFactory &factory,
+                                          const typename MediaTraits<Tag>::Sender &item)
+    {
+      if constexpr (std::is_same_v<Tag, VideoTag>)
+        return factory.make_video_sender_resources(item);
+      else if constexpr (std::is_same_v<Tag, AudioTag>)
+        return factory.make_audio_sender_resources(item);
+      else
+        return factory.make_ancillary_sender_resources(item);
+    }
+
+    template <typename Tag>
+    ReceiverResources make_receiver_resources(const NodeResourceFactory &factory,
+                                              const typename MediaTraits<Tag>::Receiver &item)
+    {
+      if constexpr (std::is_same_v<Tag, VideoTag>)
+        return factory.make_video_receiver_resources(item);
+      else if constexpr (std::is_same_v<Tag, AudioTag>)
+        return factory.make_audio_receiver_resources(item);
+      else
+        return factory.make_ancillary_receiver_resources(item);
+    }
+
+    template <typename Tag>
+    nmos::id make_receiver_resource_id(const utility::string_t &seed_id,
+                                       const std::string &id)
+    {
+      return impl::make_id(seed_id, nmos::types::receiver,
+                           MediaTraits<Tag>::port(), id);
+    }
+  } // namespace
+
+  // ============================================================
+  // Constructor & simple helpers
+  // ============================================================
+
   NodeResourceController::NodeResourceController(
       NodeResourceControllerContext ctx)
       : stream_store_(ctx.stream_store), node_model_(ctx.node_model),
@@ -42,66 +203,6 @@ namespace seeder::nmos_node::internal
     return ResourceLifecycleService(node_model_);
   }
 
-  NodeResourceController::SenderResources
-  NodeResourceController::make_video_sender_resources(
-      const VideoSender &video) const
-  {
-    return make_resource_factory().make_video_sender_resources(video);
-  }
-
-  NodeResourceController::SenderResources
-  NodeResourceController::make_audio_sender_resources(
-      const AudioSender &audio) const
-  {
-    return make_resource_factory().make_audio_sender_resources(audio);
-  }
-
-  NodeResourceController::SenderResources
-  NodeResourceController::make_ancillary_sender_resources(
-      const AncillarySender &ancillary) const
-  {
-    return make_resource_factory().make_ancillary_sender_resources(ancillary);
-  }
-
-  NodeResourceController::ReceiverResources
-  NodeResourceController::make_video_receiver_resources(
-      const VideoReceiver &video) const
-  {
-    return make_resource_factory().make_video_receiver_resources(video);
-  }
-
-  NodeResourceController::ReceiverResources
-  NodeResourceController::make_audio_receiver_resources(
-      const AudioReceiver &audio) const
-  {
-    return make_resource_factory().make_audio_receiver_resources(audio);
-  }
-
-  NodeResourceController::ReceiverResources
-  NodeResourceController::make_ancillary_receiver_resources(
-      const AncillaryReceiver &ancillary) const
-  {
-    return make_resource_factory().make_ancillary_receiver_resources(ancillary);
-  }
-
-  nmos::id NodeResourceController::make_video_receiver_resource_id(
-      const std::string &id) const
-  {
-    return impl::make_id(seed_id_, nmos::types::receiver, impl::ports::video, id);
-  }
-
-  nmos::id NodeResourceController::make_audio_receiver_resource_id(
-      const std::string &id) const
-  {
-    return impl::make_id(seed_id_, nmos::types::receiver, impl::ports::audio, id);
-  }
-
-  nmos::id NodeResourceController::make_ancillary_receiver_resource_id(
-      const std::string &id) const
-  {
-    return impl::make_id(seed_id_, nmos::types::receiver, impl::ports::data, id);
-  }
-
   bool NodeResourceController::has_sender_resources(
       const nmos::id &sender_id,
       const nmos::id &source_id,
@@ -121,15 +222,280 @@ namespace seeder::nmos_node::internal
                                    {sender_id, nmos::types::sender});
   }
 
-  bool NodeResourceController::ensure_video_sender_resources_for_update(
-      const VideoSender &video, nmos::write_lock &lock)
+  // ============================================================
+  // Template implementations — add / remove / update
+  // ============================================================
+
+  template <typename Tag>
+  void NodeResourceController::add_sender_impl(
+      typename MediaTraits<Tag>::Sender sender)
   {
-    const auto source_id =
-        impl::make_id(seed_id_, nmos::types::source, impl::ports::video, video.id);
-    const auto flow_id =
-        impl::make_id(seed_id_, nmos::types::flow, impl::ports::video, video.id);
-    const auto sender_id =
-        impl::make_id(seed_id_, nmos::types::sender, impl::ports::video, video.id);
+    bool exists = false;
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      exists = nullptr !=
+               StoreAccessor<Tag>::find_sender(stream_store_, sender.id);
+    }
+    if (exists)
+    {
+      update_sender_impl<Tag>(std::move(sender));
+      return;
+    }
+    nmos::write_lock lock = node_model_.write_lock();
+    auto resources =
+        make_sender_resources<Tag>(make_resource_factory(), sender);
+    const auto source_id = resources.source.id;
+    const auto flow_id   = resources.flow.id;
+    const auto sender_id = resources.sender.id;
+
+    lifecycle_service().erase_sender_resources_if_present(sender_id, source_id,
+                                                          flow_id);
+
+    const auto insert_result = lifecycle_service().insert_sender_resources_after(
+        0, std::move(resources.source), std::move(resources.flow),
+        std::move(resources.sender), std::move(resources.connection_sender),
+        *gate_, lock);
+    if (insert_result != ResourceInsertResult::success)
+    {
+      const auto *name = MediaTraits<Tag>::name();
+      if (insert_result == ResourceInsertResult::source_failed)
+        throw node_implementation_init_exception(
+            std::string("add ") + name + " sender source failed!");
+      if (insert_result == ResourceInsertResult::flow_failed)
+        throw node_implementation_init_exception(
+            std::string("add ") + name + " sender flow failed!");
+      if (insert_result == ResourceInsertResult::sender_failed)
+        throw node_implementation_init_exception(
+            std::string("add ") + name + " sender failed!");
+      throw node_implementation_init_exception(
+          std::string("add ") + name + " sender connection failed!");
+    }
+    sender.sender_id = utility::us2s(sender_id);
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      StoreAccessor<Tag>::add_sender(stream_store_, std::move(sender));
+    }
+    stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
+    nmos::modify_resource(
+        node_model_.node_resources, device_id_,
+        ([&](nmos::resource &device) {
+          device.data[nmos::fields::senders] =
+              value_from_elements(stream_store_.sender_ids());
+          device.data[nmos::fields::version] =
+              value(nmos::make_version());
+        }));
+  }
+
+  template <typename Tag>
+  void NodeResourceController::remove_sender_impl(std::string id)
+  {
+    bool exists = false;
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      exists = nullptr != StoreAccessor<Tag>::find_sender(stream_store_, id);
+    }
+    if (!exists)
+    {
+      slog::log<slog::severities::error>(*gate_, SLOG_FLF)
+          << nmos::stash_category(impl::categories::node_implementation)
+          << "remove " << MediaTraits<Tag>::name()
+          << " sender not found, id:" << id;
+      return;
+    }
+    nmos::write_lock lock = node_model_.write_lock();
+
+    const auto source_id = impl::make_id(
+        seed_id_, nmos::types::source, MediaTraits<Tag>::port(), id);
+    const auto flow_id = impl::make_id(
+        seed_id_, nmos::types::flow, MediaTraits<Tag>::port(), id);
+    const auto sender_id = impl::make_id(
+        seed_id_, nmos::types::sender, MediaTraits<Tag>::port(), id);
+
+    lifecycle_service().remove_sender_resources_after(
+        0, sender_id, source_id, flow_id, *gate_, lock);
+
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      StoreAccessor<Tag>::remove_sender(stream_store_,
+                                        utility::us2s(sender_id));
+    }
+
+    stream_store_.remove_sender_resource_ids(sender_id, source_id, flow_id);
+    nmos::modify_resource(
+        node_model_.node_resources, device_id_,
+        ([&](nmos::resource &device) {
+          device.data[nmos::fields::senders] =
+              value_from_elements(stream_store_.sender_ids());
+          device.data[nmos::fields::version] =
+              value(nmos::make_version());
+        }));
+    slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
+        << nmos::stash_category(impl::categories::node_implementation)
+        << "Remove id:" << id << "  sender_id:" << sender_id;
+  }
+
+  template <typename Tag>
+  void NodeResourceController::update_sender_impl(
+      typename MediaTraits<Tag>::Sender sender)
+  {
+    bool exists = false;
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      exists = nullptr !=
+               StoreAccessor<Tag>::find_sender(stream_store_, sender.id);
+    }
+    if (!exists)
+    {
+      add_sender_impl<Tag>(std::move(sender));
+      return;
+    }
+
+    nmos::write_lock lock = node_model_.write_lock();
+    if (!ensure_sender_resources_for_update_impl<Tag>(sender, lock))
+    {
+      return;
+    }
+    const auto sender_id = impl::make_id(
+        seed_id_, nmos::types::sender, MediaTraits<Tag>::port(), sender.id);
+    auto resources = make_sender_resources<Tag>(make_resource_factory(), sender);
+    replace_sender_resources(
+        std::string("update ") + MediaTraits<Tag>::name() + " sender",
+        std::move(resources), sender.redundancy.present);
+    sender.sender_id = utility::us2s(sender_id);
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      StoreAccessor<Tag>::replace_sender(stream_store_, sender);
+    }
+    node_model_.notify();
+  }
+
+  template <typename Tag>
+  void NodeResourceController::add_receiver_impl(
+      typename MediaTraits<Tag>::Receiver receiver)
+  {
+    bool exists = false;
+    {
+      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+      exists = nullptr !=
+               StoreAccessor<Tag>::find_receiver(stream_store_, receiver.id);
+    }
+    if (exists)
+    {
+      update_receiver_impl<Tag>(std::move(receiver));
+      return;
+    }
+    nmos::write_lock lock = node_model_.write_lock();
+    auto resources =
+        make_receiver_resources<Tag>(make_resource_factory(), receiver);
+    const auto receiver_id = resources.receiver.id;
+
+    lifecycle_service().erase_receiver_resources_if_present(receiver_id);
+
+    const auto insert_result =
+        lifecycle_service().insert_receiver_resources_after(
+            0, std::move(resources.receiver),
+            std::move(resources.connection_receiver), *gate_, lock);
+    if (insert_result != ResourceInsertResult::success)
+    {
+      const auto *name = MediaTraits<Tag>::name();
+      if (insert_result == ResourceInsertResult::receiver_failed)
+        throw node_implementation_init_exception(
+            std::string("add ") + name + " receiver failed!");
+      throw node_implementation_init_exception(
+          std::string("add ") + name + " receiver connection failed!");
+    }
+    {
+      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+      StoreAccessor<Tag>::add_receiver(stream_store_, std::move(receiver),
+                                       receiver_id);
+    }
+    stream_store_.add_receiver_id(receiver_id);
+    nmos::modify_resource(
+        node_model_.node_resources, device_id_,
+        ([&](nmos::resource &device) {
+          device.data[nmos::fields::receivers] =
+              value_from_elements(stream_store_.receiver_ids());
+          device.data[nmos::fields::version] =
+              value(nmos::make_version());
+        }));
+  }
+
+  template <typename Tag>
+  void NodeResourceController::remove_receiver_impl(std::string id)
+  {
+    nmos::write_lock lock = node_model_.write_lock();
+    std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+
+    auto *item = StoreAccessor<Tag>::find_receiver(stream_store_, id);
+    if (!item)
+    {
+      slog::log<slog::severities::error>(*gate_, SLOG_FLF)
+          << nmos::stash_category(impl::categories::node_implementation)
+          << "remove " << MediaTraits<Tag>::name()
+          << " receiver not found, id:" << id;
+      return;
+    }
+    const auto receiver_id =
+        make_receiver_resource_id<Tag>(seed_id_, id);
+    stream_store_.remove_receiver_id(receiver_id);
+
+    nmos::modify_resource(
+        node_model_.node_resources, device_id_,
+        ([&](nmos::resource &device) {
+          device.data[nmos::fields::receivers] =
+              value_from_elements(stream_store_.receiver_ids());
+          device.data[nmos::fields::version] =
+              value(nmos::make_version());
+        }));
+    node_model_.notify();
+    lifecycle_service().remove_receiver_resources_after(
+        0, receiver_id, *gate_, lock);
+    StoreAccessor<Tag>::remove_receiver(stream_store_, id);
+  }
+
+  template <typename Tag>
+  void NodeResourceController::update_receiver_impl(
+      typename MediaTraits<Tag>::Receiver receiver)
+  {
+    bool exists = false;
+    {
+      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+      exists = nullptr !=
+               StoreAccessor<Tag>::find_receiver(stream_store_, receiver.id);
+    }
+    if (!exists)
+    {
+      add_receiver_impl<Tag>(std::move(receiver));
+      return;
+    }
+
+    nmos::write_lock lock = node_model_.write_lock();
+    auto resources =
+        make_receiver_resources<Tag>(make_resource_factory(), receiver);
+    replace_receiver_resources(
+        std::string("update ") + MediaTraits<Tag>::name() + " receiver",
+        std::move(resources), receiver.redundancy.present);
+    {
+      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+      StoreAccessor<Tag>::replace_receiver(stream_store_, receiver);
+    }
+    node_model_.notify();
+  }
+
+  // ============================================================
+  // ensure_*_sender_resources_for_update (template)
+  // ============================================================
+
+  template <typename Tag>
+  bool NodeResourceController::ensure_sender_resources_for_update_impl(
+      const typename MediaTraits<Tag>::Sender &item, nmos::write_lock &lock)
+  {
+    const auto source_id = impl::make_id(
+        seed_id_, nmos::types::source, MediaTraits<Tag>::port(), item.id);
+    const auto flow_id = impl::make_id(
+        seed_id_, nmos::types::flow, MediaTraits<Tag>::port(), item.id);
+    const auto sender_id = impl::make_id(
+        seed_id_, nmos::types::sender, MediaTraits<Tag>::port(), item.id);
     if (has_sender_resources(sender_id, source_id, flow_id))
     {
       return true;
@@ -137,17 +503,20 @@ namespace seeder::nmos_node::internal
 
     slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
         << nmos::stash_category(impl::categories::node_implementation)
-        << "video sender resources incomplete before update, rebuilding id:"
-        << video.id;
+        << MediaTraits<Tag>::name()
+        << " sender resources incomplete before update, rebuilding id:"
+        << item.id;
     lifecycle_service().erase_sender_resources_if_present(sender_id, source_id,
                                                           flow_id);
     stream_store_.remove_sender_resource_ids(sender_id, source_id, flow_id);
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      remove_video_sender_by_sender_id(utility::us2s(sender_id));
+      StoreAccessor<Tag>::remove_sender(stream_store_,
+                                        utility::us2s(sender_id));
     }
 
-    auto resources = make_video_sender_resources(video);
+    auto resources =
+        make_sender_resources<Tag>(make_resource_factory(), item);
     const auto insert_result = lifecycle_service().insert_sender_resources_after(
         0, std::move(resources.source), std::move(resources.flow),
         std::move(resources.sender), std::move(resources.connection_sender),
@@ -155,136 +524,235 @@ namespace seeder::nmos_node::internal
     if (insert_result != ResourceInsertResult::success)
     {
       throw node_implementation_init_exception(
-          "rebuild video sender resources failed!");
+          std::string("rebuild ") + MediaTraits<Tag>::name() +
+          " sender resources failed!");
     }
 
-    VideoSender rebuilt = video;
+    auto rebuilt = item;
     rebuilt.sender_id = utility::us2s(sender_id);
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      stream_store_.add(std::move(rebuilt));
+      StoreAccessor<Tag>::add_sender(stream_store_, std::move(rebuilt));
     }
     stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_,
-                          ([&](nmos::resource &device)
-                          {
-                            device.data[nmos::fields::senders] =
-                                value_from_elements(stream_store_.sender_ids());
-                            device.data[nmos::fields::version] =
-                                value(nmos::make_version());
-                          }));
+    nmos::modify_resource(
+        node_model_.node_resources, device_id_,
+        ([&](nmos::resource &device) {
+          device.data[nmos::fields::senders] =
+              value_from_elements(stream_store_.sender_ids());
+          device.data[nmos::fields::version] =
+              value(nmos::make_version());
+        }));
     return false;
   }
 
-  bool NodeResourceController::ensure_audio_sender_resources_for_update(
-      const AudioSender &audio, nmos::write_lock &lock)
+  // ============================================================
+  // replace_*_for_runtime (template)
+  // ============================================================
+
+  template <typename Tag>
+  void NodeResourceController::replace_sender_resources_for_runtime_impl(
+      const typename MediaTraits<Tag>::Sender &item)
   {
-    const auto source_id =
-        impl::make_id(seed_id_, nmos::types::source, impl::ports::audio, audio.id);
-    const auto flow_id =
-        impl::make_id(seed_id_, nmos::types::flow, impl::ports::audio, audio.id);
-    const auto sender_id =
-        impl::make_id(seed_id_, nmos::types::sender, impl::ports::audio, audio.id);
-    if (has_sender_resources(sender_id, source_id, flow_id))
+    const auto source_id = impl::make_id(
+        seed_id_, nmos::types::source, MediaTraits<Tag>::port(), item.id);
+    const auto flow_id = impl::make_id(
+        seed_id_, nmos::types::flow, MediaTraits<Tag>::port(), item.id);
+    const auto sender_id = impl::make_id(
+        seed_id_, nmos::types::sender, MediaTraits<Tag>::port(), item.id);
+    if (!has_sender_resources(sender_id, source_id, flow_id))
     {
-      return true;
+      slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
+          << nmos::stash_category(impl::categories::node_implementation)
+          << "runtime interfaces update skipped incomplete "
+          << MediaTraits<Tag>::name() << " sender id:" << item.id;
+      return;
     }
-
-    slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
-        << nmos::stash_category(impl::categories::node_implementation)
-        << "audio sender resources incomplete before update, rebuilding id:"
-        << audio.id;
-    lifecycle_service().erase_sender_resources_if_present(sender_id, source_id,
-                                                          flow_id);
-    stream_store_.remove_sender_resource_ids(sender_id, source_id, flow_id);
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      remove_audio_sender_by_sender_id(utility::us2s(sender_id));
-    }
-
-    auto resources = make_audio_sender_resources(audio);
-    const auto insert_result = lifecycle_service().insert_sender_resources_after(
-        0, std::move(resources.source), std::move(resources.flow),
-        std::move(resources.sender), std::move(resources.connection_sender),
-        *gate_, lock);
-    if (insert_result != ResourceInsertResult::success)
-    {
-      throw node_implementation_init_exception(
-          "rebuild audio sender resources failed!");
-    }
-
-    AudioSender rebuilt = audio;
-    rebuilt.sender_id = utility::us2s(sender_id);
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      stream_store_.add(std::move(rebuilt));
-    }
-    stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_,
-                          ([&](nmos::resource &device)
-                          {
-                            device.data[nmos::fields::senders] =
-                                value_from_elements(stream_store_.sender_ids());
-                            device.data[nmos::fields::version] =
-                                value(nmos::make_version());
-                          }));
-    return false;
+    replace_sender_resources(
+        std::string("runtime interfaces update ") +
+            MediaTraits<Tag>::name() + " sender",
+        make_sender_resources<Tag>(make_resource_factory(), item),
+        item.redundancy.present);
   }
 
-  bool NodeResourceController::ensure_ancillary_sender_resources_for_update(
-      const AncillarySender &ancillary, nmos::write_lock &lock)
+  template <typename Tag>
+  void NodeResourceController::replace_receiver_resources_for_runtime_impl(
+      const typename MediaTraits<Tag>::Receiver &item)
   {
-    const auto source_id =
-        impl::make_id(seed_id_, nmos::types::source, impl::ports::data, ancillary.id);
-    const auto flow_id =
-        impl::make_id(seed_id_, nmos::types::flow, impl::ports::data, ancillary.id);
-    const auto sender_id =
-        impl::make_id(seed_id_, nmos::types::sender, impl::ports::data, ancillary.id);
-    if (has_sender_resources(sender_id, source_id, flow_id))
-    {
-      return true;
-    }
-
-    slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
-        << nmos::stash_category(impl::categories::node_implementation)
-        << "ancillary sender resources incomplete before update, rebuilding id:"
-        << ancillary.id;
-    lifecycle_service().erase_sender_resources_if_present(sender_id, source_id,
-                                                          flow_id);
-    stream_store_.remove_sender_resource_ids(sender_id, source_id, flow_id);
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      remove_ancillary_sender_by_sender_id(utility::us2s(sender_id));
-    }
-
-    auto resources = make_ancillary_sender_resources(ancillary);
-    const auto insert_result = lifecycle_service().insert_sender_resources_after(
-        0, std::move(resources.source), std::move(resources.flow),
-        std::move(resources.sender), std::move(resources.connection_sender),
-        *gate_, lock);
-    if (insert_result != ResourceInsertResult::success)
-    {
-      throw node_implementation_init_exception(
-          "rebuild ancillary sender resources failed!");
-    }
-
-    AncillarySender rebuilt = ancillary;
-    rebuilt.sender_id = utility::us2s(sender_id);
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      stream_store_.add(std::move(rebuilt));
-    }
-    stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_,
-                          ([&](nmos::resource &device)
-                          {
-                            device.data[nmos::fields::senders] =
-                                value_from_elements(stream_store_.sender_ids());
-                            device.data[nmos::fields::version] =
-                                value(nmos::make_version());
-                          }));
-    return false;
+    replace_receiver_resources(
+        std::string("runtime interfaces update ") +
+            MediaTraits<Tag>::name() + " receiver",
+        make_receiver_resources<Tag>(make_resource_factory(), item),
+        item.redundancy.present);
   }
+
+  // ============================================================
+  // Explicit template instantiations
+  // ============================================================
+
+  template void NodeResourceController::add_sender_impl<VideoTag>(VideoSender);
+  template void NodeResourceController::add_sender_impl<AudioTag>(AudioSender);
+  template void NodeResourceController::add_sender_impl<AncillaryTag>(AncillarySender);
+
+  template void NodeResourceController::remove_sender_impl<VideoTag>(std::string);
+  template void NodeResourceController::remove_sender_impl<AudioTag>(std::string);
+  template void NodeResourceController::remove_sender_impl<AncillaryTag>(std::string);
+
+  template void NodeResourceController::update_sender_impl<VideoTag>(VideoSender);
+  template void NodeResourceController::update_sender_impl<AudioTag>(AudioSender);
+  template void NodeResourceController::update_sender_impl<AncillaryTag>(AncillarySender);
+
+  template void NodeResourceController::add_receiver_impl<VideoTag>(VideoReceiver);
+  template void NodeResourceController::add_receiver_impl<AudioTag>(AudioReceiver);
+  template void NodeResourceController::add_receiver_impl<AncillaryTag>(AncillaryReceiver);
+
+  template void NodeResourceController::remove_receiver_impl<VideoTag>(std::string);
+  template void NodeResourceController::remove_receiver_impl<AudioTag>(std::string);
+  template void NodeResourceController::remove_receiver_impl<AncillaryTag>(std::string);
+
+  template void NodeResourceController::update_receiver_impl<VideoTag>(VideoReceiver);
+  template void NodeResourceController::update_receiver_impl<AudioTag>(AudioReceiver);
+  template void NodeResourceController::update_receiver_impl<AncillaryTag>(AncillaryReceiver);
+
+  template bool NodeResourceController::ensure_sender_resources_for_update_impl<VideoTag>(
+      const VideoSender &, nmos::write_lock &);
+  template bool NodeResourceController::ensure_sender_resources_for_update_impl<AudioTag>(
+      const AudioSender &, nmos::write_lock &);
+  template bool NodeResourceController::ensure_sender_resources_for_update_impl<AncillaryTag>(
+      const AncillarySender &, nmos::write_lock &);
+
+  template void NodeResourceController::replace_sender_resources_for_runtime_impl<VideoTag>(
+      const VideoSender &);
+  template void NodeResourceController::replace_sender_resources_for_runtime_impl<AudioTag>(
+      const AudioSender &);
+  template void NodeResourceController::replace_sender_resources_for_runtime_impl<AncillaryTag>(
+      const AncillarySender &);
+
+  template void NodeResourceController::replace_receiver_resources_for_runtime_impl<VideoTag>(
+      const VideoReceiver &);
+  template void NodeResourceController::replace_receiver_resources_for_runtime_impl<AudioTag>(
+      const AudioReceiver &);
+  template void NodeResourceController::replace_receiver_resources_for_runtime_impl<AncillaryTag>(
+      const AncillaryReceiver &);
+
+  // ============================================================
+  // Public API — thin delegates to template impls
+  // ============================================================
+
+  void NodeResourceController::add_video_sender(VideoSender video)
+  {
+    add_sender_impl<VideoTag>(std::move(video));
+  }
+  void NodeResourceController::add_audio_sender(AudioSender audio)
+  {
+    add_sender_impl<AudioTag>(std::move(audio));
+  }
+  void NodeResourceController::add_ancillary_sender(AncillarySender ancillary)
+  {
+    add_sender_impl<AncillaryTag>(std::move(ancillary));
+  }
+
+  void NodeResourceController::remove_video_sender(std::string id)
+  {
+    remove_sender_impl<VideoTag>(std::move(id));
+  }
+  void NodeResourceController::remove_audio_sender(std::string id)
+  {
+    remove_sender_impl<AudioTag>(std::move(id));
+  }
+  void NodeResourceController::remove_ancillary_sender(std::string id)
+  {
+    remove_sender_impl<AncillaryTag>(std::move(id));
+  }
+
+  void NodeResourceController::update_video_sender(VideoSender video)
+  {
+    update_sender_impl<VideoTag>(std::move(video));
+  }
+  void NodeResourceController::update_audio_sender(AudioSender audio)
+  {
+    update_sender_impl<AudioTag>(std::move(audio));
+  }
+  void NodeResourceController::update_ancillary_sender(AncillarySender ancillary)
+  {
+    update_sender_impl<AncillaryTag>(std::move(ancillary));
+  }
+
+  void NodeResourceController::add_video_receiver(VideoReceiver video)
+  {
+    add_receiver_impl<VideoTag>(std::move(video));
+  }
+  void NodeResourceController::add_audio_receiver(AudioReceiver audio)
+  {
+    add_receiver_impl<AudioTag>(std::move(audio));
+  }
+  void NodeResourceController::add_ancillary_receiver(AncillaryReceiver ancillary)
+  {
+    add_receiver_impl<AncillaryTag>(std::move(ancillary));
+  }
+
+  void NodeResourceController::remove_video_receiver(std::string id)
+  {
+    remove_receiver_impl<VideoTag>(std::move(id));
+  }
+  void NodeResourceController::remove_audio_receiver(std::string id)
+  {
+    remove_receiver_impl<AudioTag>(std::move(id));
+  }
+  void NodeResourceController::remove_ancillary_receiver(std::string id)
+  {
+    remove_receiver_impl<AncillaryTag>(std::move(id));
+  }
+
+  void NodeResourceController::update_video_receiver(VideoReceiver video)
+  {
+    update_receiver_impl<VideoTag>(std::move(video));
+  }
+  void NodeResourceController::update_audio_receiver(AudioReceiver audio)
+  {
+    update_receiver_impl<AudioTag>(std::move(audio));
+  }
+  void NodeResourceController::update_ancillary_receiver(
+      AncillaryReceiver ancillary)
+  {
+    update_receiver_impl<AncillaryTag>(std::move(ancillary));
+  }
+
+  void NodeResourceController::replace_video_sender_resources_for_runtime(
+      const VideoSender &video)
+  {
+    replace_sender_resources_for_runtime_impl<VideoTag>(video);
+  }
+  void NodeResourceController::replace_audio_sender_resources_for_runtime(
+      const AudioSender &audio)
+  {
+    replace_sender_resources_for_runtime_impl<AudioTag>(audio);
+  }
+  void NodeResourceController::replace_ancillary_sender_resources_for_runtime(
+      const AncillarySender &ancillary)
+  {
+    replace_sender_resources_for_runtime_impl<AncillaryTag>(ancillary);
+  }
+
+  void NodeResourceController::replace_video_receiver_resources_for_runtime(
+      const VideoReceiver &video)
+  {
+    replace_receiver_resources_for_runtime_impl<VideoTag>(video);
+  }
+  void NodeResourceController::replace_audio_receiver_resources_for_runtime(
+      const AudioReceiver &audio)
+  {
+    replace_receiver_resources_for_runtime_impl<AudioTag>(audio);
+  }
+  void NodeResourceController::replace_ancillary_receiver_resources_for_runtime(
+      const AncillaryReceiver &ancillary)
+  {
+    replace_receiver_resources_for_runtime_impl<AncillaryTag>(ancillary);
+  }
+
+  // ============================================================
+  // replace_sender / replace_receiver (unchanged)
+  // ============================================================
 
   void NodeResourceController::replace_sender_resources(
       const std::string &description, SenderResources resources,
@@ -373,6 +841,10 @@ namespace seeder::nmos_node::internal
     }
   }
 
+  // ============================================================
+  // StreamStore pass-throughs (unchanged)
+  // ============================================================
+
   VideoSender *NodeResourceController::find_video_sender_by_id(std::string id)
   {
     return stream_store_.find_video_sender_by_id(id);
@@ -438,728 +910,4 @@ namespace seeder::nmos_node::internal
     stream_store_.remove_ancillary_receiver_by_id(id);
   }
 
-  void NodeResourceController::add_video_sender(VideoSender video)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      exists = nullptr != find_video_sender_by_id(video.id);
-    }
-    if (exists)
-    {
-      update_video_sender(std::move(video));
-      return;
-    }
-    nmos::write_lock lock = node_model_.write_lock();
-    auto resources = make_video_sender_resources(video);
-    const auto source_id = resources.source.id;
-    const auto flow_id = resources.flow.id;
-    const auto sender_id = resources.sender.id;
-
-    lifecycle_service().erase_sender_resources_if_present(sender_id, source_id,
-                                                         flow_id);
-
-    const auto insert_result = lifecycle_service().insert_sender_resources_after(
-        0, std::move(resources.source), std::move(resources.flow),
-        std::move(resources.sender), std::move(resources.connection_sender),
-        *gate_, lock);
-    if (insert_result != ResourceInsertResult::success)
-    {
-      if (insert_result == ResourceInsertResult::source_failed)
-        throw node_implementation_init_exception(
-            "add video sender source failed!");
-      if (insert_result == ResourceInsertResult::flow_failed)
-        throw node_implementation_init_exception(
-            "add video sender flow failed!");
-      if (insert_result == ResourceInsertResult::sender_failed)
-        throw node_implementation_init_exception("add video sender failed!");
-      throw node_implementation_init_exception(
-          "add video sender connection failed!");
-    }
-    video.sender_id = utility::us2s(sender_id);
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      stream_store_.add(std::move(video));
-    }
-    stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::senders] = value_from_elements(stream_store_.sender_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-  }
-
-  void NodeResourceController::add_audio_sender(AudioSender audio)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      exists = nullptr != find_audio_sender_by_id(audio.id);
-    }
-    if (exists)
-    {
-      update_audio_sender(std::move(audio));
-      return;
-    }
-    nmos::write_lock lock = node_model_.write_lock();
-    auto resources = make_audio_sender_resources(audio);
-    const auto source_id = resources.source.id;
-    const auto flow_id = resources.flow.id;
-    const auto sender_id = resources.sender.id;
-
-    lifecycle_service().erase_sender_resources_if_present(sender_id, source_id,
-                                                         flow_id);
-
-    const auto insert_result = lifecycle_service().insert_sender_resources_after(
-        0, std::move(resources.source), std::move(resources.flow),
-        std::move(resources.sender), std::move(resources.connection_sender),
-        *gate_, lock);
-    if (insert_result != ResourceInsertResult::success)
-    {
-      if (insert_result == ResourceInsertResult::source_failed)
-        throw node_implementation_init_exception(
-            "add audio sender source failed!");
-      if (insert_result == ResourceInsertResult::flow_failed)
-        throw node_implementation_init_exception(
-            "add audio sender flow failed!");
-      if (insert_result == ResourceInsertResult::sender_failed)
-        throw node_implementation_init_exception(
-            "insert audio sender failed!");
-      throw node_implementation_init_exception(
-          "insert audio connection sender failed!");
-    }
-    audio.sender_id = utility::us2s(sender_id);
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      stream_store_.add(std::move(audio));
-    }
-    stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::senders] = value_from_elements(stream_store_.sender_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-  }
-
-  void NodeResourceController::add_ancillary_sender(AncillarySender ancillary)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      exists = nullptr != find_ancillary_sender_by_id(ancillary.id);
-    }
-    if (exists)
-    {
-      update_ancillary_sender(std::move(ancillary));
-      return;
-    }
-    nmos::write_lock lock = node_model_.write_lock();
-    auto resources = make_ancillary_sender_resources(ancillary);
-    const auto source_id = resources.source.id;
-    const auto flow_id = resources.flow.id;
-    const auto sender_id = resources.sender.id;
-
-    const auto insert_result = lifecycle_service().insert_sender_resources_after(
-        0, std::move(resources.source), std::move(resources.flow),
-        std::move(resources.sender), std::move(resources.connection_sender),
-        *gate_, lock);
-    if (insert_result != ResourceInsertResult::success)
-    {
-      if (insert_result == ResourceInsertResult::source_failed)
-        throw node_implementation_init_exception(
-            " add ancillary sender source failed!");
-      if (insert_result == ResourceInsertResult::flow_failed)
-        throw node_implementation_init_exception(
-            "add ancillary sender flow failed!");
-      if (insert_result == ResourceInsertResult::sender_failed)
-        throw node_implementation_init_exception(
-            "add ancillary sender failed!");
-      throw node_implementation_init_exception(
-          "add ancillary sender connection failed!");
-    }
-    ancillary.sender_id = utility::us2s(sender_id);
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      stream_store_.add(std::move(ancillary));
-    }
-    stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::senders] = value_from_elements(stream_store_.sender_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-  }
-
-  void NodeResourceController::add_video_receiver(VideoReceiver video)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      exists = nullptr != find_video_receiver_by_id(video.id);
-    }
-    if (exists)
-    {
-      update_video_receiver(std::move(video));
-      return;
-    }
-    nmos::write_lock lock = node_model_.write_lock();
-    auto resources = make_video_receiver_resources(video);
-    const auto receiver_id = resources.receiver.id;
-
-    lifecycle_service().erase_receiver_resources_if_present(receiver_id);
-
-    const auto insert_result = lifecycle_service().insert_receiver_resources_after(
-        0, std::move(resources.receiver), std::move(resources.connection_receiver),
-        *gate_, lock);
-    if (insert_result != ResourceInsertResult::success)
-    {
-      if (insert_result == ResourceInsertResult::receiver_failed)
-        throw node_implementation_init_exception(
-            "insert video receiver failed!");
-      throw node_implementation_init_exception(
-          "insert video connection receiver failed!");
-    }
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      stream_store_.add(std::move(video), receiver_id);
-    }
-    stream_store_.add_receiver_id(receiver_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::receivers] = value_from_elements(stream_store_.receiver_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-  }
-
-  void NodeResourceController::add_audio_receiver(AudioReceiver audio)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      exists = nullptr != find_audio_receiver_by_id(audio.id);
-    }
-    if (exists)
-    {
-      update_audio_receiver(std::move(audio));
-      return;
-    }
-    nmos::write_lock lock = node_model_.write_lock();
-    auto resources = make_audio_receiver_resources(audio);
-    const auto receiver_id = resources.receiver.id;
-
-    lifecycle_service().erase_receiver_resources_if_present(receiver_id);
-
-    const auto insert_result = lifecycle_service().insert_receiver_resources_after(
-        0, std::move(resources.receiver), std::move(resources.connection_receiver),
-        *gate_, lock);
-    if (insert_result != ResourceInsertResult::success)
-    {
-      if (insert_result == ResourceInsertResult::receiver_failed)
-        throw node_implementation_init_exception(
-            "add audio receiver failed!");
-      throw node_implementation_init_exception(
-          "add audio receiver connection failed!");
-    }
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      stream_store_.add(std::move(audio), receiver_id);
-    }
-    stream_store_.add_receiver_id(receiver_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::receivers] = value_from_elements(stream_store_.receiver_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-  }
-
-  void NodeResourceController::add_ancillary_receiver(AncillaryReceiver ancillary)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      exists = nullptr != find_ancillary_receiver_by_id(ancillary.id);
-    }
-    if (exists)
-    {
-      update_ancillary_receiver(std::move(ancillary));
-      return;
-    }
-    nmos::write_lock lock = node_model_.write_lock();
-    auto resources = make_ancillary_receiver_resources(ancillary);
-    const auto receiver_id = resources.receiver.id;
-
-    lifecycle_service().erase_receiver_resources_if_present(receiver_id);
-
-    const auto insert_result = lifecycle_service().insert_receiver_resources_after(
-        0, std::move(resources.receiver), std::move(resources.connection_receiver),
-        *gate_, lock);
-    if (insert_result != ResourceInsertResult::success)
-    {
-      if (insert_result == ResourceInsertResult::receiver_failed)
-        throw node_implementation_init_exception(
-            "add ancillary receiver failed!");
-      throw node_implementation_init_exception(
-          "add ancillary receiver connection failed!");
-    }
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      stream_store_.add(std::move(ancillary), receiver_id);
-    }
-    stream_store_.add_receiver_id(receiver_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::receivers] = value_from_elements(stream_store_.receiver_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-  }
-
-  void NodeResourceController::remove_video_sender(std::string id)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      exists = nullptr != find_video_sender_by_id(id);
-    }
-    if (!exists)
-    {
-      slog::log<slog::severities::error>(*gate_, SLOG_FLF)
-          << nmos::stash_category(impl::categories::node_implementation)
-          << "remove video sender not found video sender id:" << id;
-      return;
-    }
-    nmos::write_lock lock = node_model_.write_lock();
-
-    const auto source_v_id =
-        impl::make_id(seed_id_, nmos::types::source, impl::ports::video, id);
-    const auto flow_v_id =
-        impl::make_id(seed_id_, nmos::types::flow, impl::ports::video, id);
-    const auto sender_v_id =
-        impl::make_id(seed_id_, nmos::types::sender, impl::ports::video, id);
-
-    lifecycle_service().remove_sender_resources_after(
-        0, sender_v_id, source_v_id, flow_v_id, *gate_, lock);
-
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      remove_video_sender_by_sender_id(utility::us2s(sender_v_id));
-    }
-
-    stream_store_.remove_sender_resource_ids(sender_v_id, source_v_id,
-                                             flow_v_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::senders] = value_from_elements(stream_store_.sender_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-    slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
-        << nmos::stash_category(impl::categories::node_implementation)
-        << "Remove id:" << id << "  sender_id:" << sender_v_id;
-  }
-
-  void NodeResourceController::remove_audio_sender(std::string id)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      exists = nullptr != find_audio_sender_by_id(id);
-    }
-    if (!exists)
-    {
-      slog::log<slog::severities::error>(*gate_, SLOG_FLF)
-          << nmos::stash_category(impl::categories::node_implementation)
-          << "remove audio sender not found audio sender id:" << id;
-      return;
-    }
-    nmos::write_lock lock = node_model_.write_lock();
-
-    const auto source_a_id =
-        impl::make_id(seed_id_, nmos::types::source, impl::ports::audio, id);
-    const auto flow_a_id =
-        impl::make_id(seed_id_, nmos::types::flow, impl::ports::audio, id);
-    const auto sender_a_id =
-        impl::make_id(seed_id_, nmos::types::sender, impl::ports::audio, id);
-
-    lifecycle_service().remove_sender_resources_after(
-        0, sender_a_id, source_a_id, flow_a_id, *gate_, lock);
-
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      remove_audio_sender_by_sender_id(utility::us2s(sender_a_id));
-    }
-
-    stream_store_.remove_sender_resource_ids(sender_a_id, source_a_id,
-                                             flow_a_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::senders] = value_from_elements(stream_store_.sender_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-    slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
-        << nmos::stash_category(impl::categories::node_implementation)
-        << "Remove id:" << id << "  sender_id:" << sender_a_id;
-  }
-
-  void NodeResourceController::remove_ancillary_sender(std::string id)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      exists = nullptr != find_ancillary_sender_by_id(id);
-    }
-    if (!exists)
-    {
-      slog::log<slog::severities::error>(*gate_, SLOG_FLF)
-          << nmos::stash_category(impl::categories::node_implementation)
-          << "remove ancillary sender not found ancillary sender id:" << id;
-      return;
-    }
-    nmos::write_lock lock = node_model_.write_lock();
-
-    const auto source_id =
-        impl::make_id(seed_id_, nmos::types::source, impl::ports::data, id);
-    const auto flow_id =
-        impl::make_id(seed_id_, nmos::types::flow, impl::ports::data, id);
-    const auto sender_id =
-        impl::make_id(seed_id_, nmos::types::sender, impl::ports::data, id);
-
-    lifecycle_service().remove_sender_resources_after(
-        0, sender_id, source_id, flow_id, *gate_, lock);
-
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      remove_ancillary_sender_by_sender_id(utility::us2s(sender_id));
-    }
-
-    stream_store_.remove_sender_resource_ids(sender_id, source_id, flow_id);
-
-    slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
-        << nmos::stash_category(impl::categories::node_implementation)
-        << "Remove id:" << id << "  sender_id:" << sender_id;
-
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::senders] = value_from_elements(stream_store_.sender_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-  }
-
-  void NodeResourceController::remove_video_receiver(std::string id)
-  {
-    nmos::write_lock lock = node_model_.write_lock();
-    std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-    VideoReceiver *video = find_video_receiver_by_id(id);
-    if (!video)
-    {
-      slog::log<slog::severities::error>(*gate_, SLOG_FLF)
-          << nmos::stash_category(impl::categories::node_implementation)
-          << "remove video receiver not found video receiver id:" << id;
-      return;
-    }
-    const auto receiver_id = make_video_receiver_resource_id(id);
-    stream_store_.remove_receiver_id(receiver_id);
-
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::receivers] = value_from_elements(stream_store_.receiver_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-    node_model_.notify();
-    lifecycle_service().remove_receiver_resources_after(
-        0, receiver_id, *gate_, lock);
-    remove_video_receiver_by_id(id);
-  }
-
-  void NodeResourceController::remove_audio_receiver(std::string id)
-  {
-    nmos::write_lock lock = node_model_.write_lock();
-    std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-    AudioReceiver *audio = find_audio_receiver_by_id(id);
-    if (!audio)
-    {
-      slog::log<slog::severities::error>(*gate_, SLOG_FLF)
-          << nmos::stash_category(impl::categories::node_implementation)
-          << "remove audio receiver not found audio receiver id:" << id;
-      return;
-    }
-    const auto receiver_id = make_audio_receiver_resource_id(id);
-    stream_store_.remove_receiver_id(receiver_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::receivers] = value_from_elements(stream_store_.receiver_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-    node_model_.notify();
-    lifecycle_service().remove_receiver_resources_after(
-        0, receiver_id, *gate_, lock);
-    remove_audio_receiver_by_id(id);
-  }
-
-  void NodeResourceController::remove_ancillary_receiver(std::string id)
-  {
-    nmos::write_lock lock = node_model_.write_lock();
-    std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-    AncillaryReceiver *ancillary = find_ancillary_receiver_by_id(id);
-    if (!ancillary)
-    {
-      slog::log<slog::severities::error>(*gate_, SLOG_FLF)
-          << nmos::stash_category(impl::categories::node_implementation)
-          << "remove ancillary receiver not found ancillary receiver id:" << id;
-      return;
-    }
-    const auto receiver_id = make_ancillary_receiver_resource_id(id);
-    stream_store_.remove_receiver_id(receiver_id);
-    nmos::modify_resource(node_model_.node_resources, device_id_, ([&](nmos::resource &device)
-                                                                   {
-                                                                     device.data[nmos::fields::receivers] = value_from_elements(stream_store_.receiver_ids());
-                                                                     device.data[nmos::fields::version] = value(nmos::make_version()); }));
-    node_model_.notify();
-    lifecycle_service().remove_receiver_resources_after(
-        0, receiver_id, *gate_, lock);
-    remove_ancillary_receiver_by_id(id);
-  }
-
-  void NodeResourceController::update_video_sender(VideoSender video)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      exists = nullptr != find_video_sender_by_id(video.id);
-    }
-    if (!exists)
-    {
-      add_video_sender(std::move(video));
-      return;
-    }
-
-    nmos::write_lock lock = node_model_.write_lock();
-    if (!ensure_video_sender_resources_for_update(video, lock))
-    {
-      return;
-    }
-    const auto sender_id = impl::make_id(
-        seed_id_, nmos::types::sender, impl::ports::video, video.id);
-    auto resources = make_video_sender_resources(video);
-    replace_sender_resources("update video sender", std::move(resources),
-                             video.redundancy.present);
-    video.sender_id = utility::us2s(sender_id);
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      stream_store_.replace(video);
-    }
-    node_model_.notify();
-  }
-
-  void NodeResourceController::update_audio_sender(AudioSender audio)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      exists = nullptr != find_audio_sender_by_id(audio.id);
-    }
-    if (!exists)
-    {
-      add_audio_sender(std::move(audio));
-      return;
-    }
-
-    nmos::write_lock lock = node_model_.write_lock();
-    if (!ensure_audio_sender_resources_for_update(audio, lock))
-    {
-      return;
-    }
-    const auto sender_id = impl::make_id(
-        seed_id_, nmos::types::sender, impl::ports::audio, audio.id);
-    auto resources = make_audio_sender_resources(audio);
-    replace_sender_resources("update audio sender", std::move(resources),
-                             audio.redundancy.present);
-    audio.sender_id = utility::us2s(sender_id);
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      stream_store_.replace(audio);
-    }
-    node_model_.notify();
-  }
-
-  void NodeResourceController::update_ancillary_sender(AncillarySender ancillary)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      exists = nullptr != find_ancillary_sender_by_id(ancillary.id);
-    }
-    if (!exists)
-    {
-      add_ancillary_sender(std::move(ancillary));
-      return;
-    }
-
-    nmos::write_lock lock = node_model_.write_lock();
-    if (!ensure_ancillary_sender_resources_for_update(ancillary, lock))
-    {
-      return;
-    }
-    const auto sender_id = impl::make_id(
-        seed_id_, nmos::types::sender, impl::ports::data, ancillary.id);
-    auto resources = make_ancillary_sender_resources(ancillary);
-    replace_sender_resources("update ancillary sender", std::move(resources),
-                             ancillary.redundancy.present);
-    ancillary.sender_id = utility::us2s(sender_id);
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      stream_store_.replace(ancillary);
-    }
-    node_model_.notify();
-  }
-
-  void NodeResourceController::update_video_receiver(VideoReceiver video)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      exists = nullptr != find_video_receiver_by_id(video.id);
-    }
-    if (!exists)
-    {
-      add_video_receiver(std::move(video));
-      return;
-    }
-
-    nmos::write_lock lock = node_model_.write_lock();
-    auto resources = make_video_receiver_resources(video);
-    replace_receiver_resources("update video receiver", std::move(resources),
-                               video.redundancy.present);
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      stream_store_.replace(video);
-    }
-    node_model_.notify();
-  }
-
-  void NodeResourceController::update_audio_receiver(AudioReceiver audio)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      exists = nullptr != find_audio_receiver_by_id(audio.id);
-    }
-    if (!exists)
-    {
-      add_audio_receiver(std::move(audio));
-      return;
-    }
-
-    nmos::write_lock lock = node_model_.write_lock();
-    auto resources = make_audio_receiver_resources(audio);
-    replace_receiver_resources("update audio receiver", std::move(resources),
-                               audio.redundancy.present);
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      stream_store_.replace(audio);
-    }
-    node_model_.notify();
-  }
-
-  void NodeResourceController::update_ancillary_receiver(
-      AncillaryReceiver ancillary)
-  {
-    bool exists = false;
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      exists = nullptr != find_ancillary_receiver_by_id(ancillary.id);
-    }
-    if (!exists)
-    {
-      add_ancillary_receiver(std::move(ancillary));
-      return;
-    }
-
-    nmos::write_lock lock = node_model_.write_lock();
-    auto resources = make_ancillary_receiver_resources(ancillary);
-    replace_receiver_resources("update ancillary receiver",
-                               std::move(resources), ancillary.redundancy.present);
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      stream_store_.replace(ancillary);
-    }
-    node_model_.notify();
-  }
-
-  void NodeResourceController::replace_video_sender_resources_for_runtime(
-      const VideoSender &video)
-  {
-    const auto source_id =
-        impl::make_id(seed_id_, nmos::types::source, impl::ports::video, video.id);
-    const auto flow_id =
-        impl::make_id(seed_id_, nmos::types::flow, impl::ports::video, video.id);
-    const auto sender_id =
-        impl::make_id(seed_id_, nmos::types::sender, impl::ports::video, video.id);
-    if (!has_sender_resources(sender_id, source_id, flow_id))
-    {
-      slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
-          << nmos::stash_category(impl::categories::node_implementation)
-          << "runtime interfaces update skipped incomplete video sender id:"
-          << video.id;
-      return;
-    }
-    replace_sender_resources("runtime interfaces update video sender",
-                             make_video_sender_resources(video),
-                             video.redundancy.present);
-  }
-
-  void NodeResourceController::replace_audio_sender_resources_for_runtime(
-      const AudioSender &audio)
-  {
-    const auto source_id =
-        impl::make_id(seed_id_, nmos::types::source, impl::ports::audio, audio.id);
-    const auto flow_id =
-        impl::make_id(seed_id_, nmos::types::flow, impl::ports::audio, audio.id);
-    const auto sender_id =
-        impl::make_id(seed_id_, nmos::types::sender, impl::ports::audio, audio.id);
-    if (!has_sender_resources(sender_id, source_id, flow_id))
-    {
-      slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
-          << nmos::stash_category(impl::categories::node_implementation)
-          << "runtime interfaces update skipped incomplete audio sender id:"
-          << audio.id;
-      return;
-    }
-    replace_sender_resources("runtime interfaces update audio sender",
-                             make_audio_sender_resources(audio),
-                             audio.redundancy.present);
-  }
-
-  void NodeResourceController::replace_ancillary_sender_resources_for_runtime(
-      const AncillarySender &ancillary)
-  {
-    const auto source_id =
-        impl::make_id(seed_id_, nmos::types::source, impl::ports::data, ancillary.id);
-    const auto flow_id =
-        impl::make_id(seed_id_, nmos::types::flow, impl::ports::data, ancillary.id);
-    const auto sender_id =
-        impl::make_id(seed_id_, nmos::types::sender, impl::ports::data, ancillary.id);
-    if (!has_sender_resources(sender_id, source_id, flow_id))
-    {
-      slog::log<slog::severities::warning>(*gate_, SLOG_FLF)
-          << nmos::stash_category(impl::categories::node_implementation)
-          << "runtime interfaces update skipped incomplete ancillary sender id:"
-          << ancillary.id;
-      return;
-    }
-    replace_sender_resources("runtime interfaces update ancillary sender",
-                             make_ancillary_sender_resources(ancillary),
-                             ancillary.redundancy.present);
-  }
-
-  void NodeResourceController::replace_video_receiver_resources_for_runtime(
-      const VideoReceiver &video)
-  {
-    replace_receiver_resources("runtime interfaces update video receiver",
-                               make_video_receiver_resources(video),
-                               video.redundancy.present);
-  }
-
-  void NodeResourceController::replace_audio_receiver_resources_for_runtime(
-      const AudioReceiver &audio)
-  {
-    replace_receiver_resources("runtime interfaces update audio receiver",
-                               make_audio_receiver_resources(audio),
-                               audio.redundancy.present);
-  }
-
-  void NodeResourceController::replace_ancillary_receiver_resources_for_runtime(
-      const AncillaryReceiver &ancillary)
-  {
-    replace_receiver_resources("runtime interfaces update ancillary receiver",
-                               make_ancillary_receiver_resources(ancillary),
-                               ancillary.redundancy.present);
-  }
-}
+} // namespace seeder::nmos_node::internal

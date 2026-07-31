@@ -1,6 +1,4 @@
 #pragma once
-#ifndef NMOS_CPP_NODE_NODE_IMPLEMENTATION_H
-#define NMOS_CPP_NODE_NODE_IMPLEMENTATION_H
 #include <nmos/id.h>
 
 #include "cpprest/host_utils.h"
@@ -16,7 +14,6 @@
 #include <cpprest/details/basic_types.h>
 #include <cpprest/json.h>
 #include <cstdio>
-// #include <json/value.h>
 #include <nmos/connection_api.h>
 #include <nmos/json_fields.h>
 #include <nmos/type.h>
@@ -88,13 +85,7 @@ const web::json::field_as_string_or colorspace{U("colorspace"), U("BT709")};
 // flows, see nmos::transfer_characteristic
 const web::json::field_as_string_or transfer_characteristic{
     U("transfer_characteristic"), U("SDR")};
-// video_type: media type of video flows, e.g. "video/raw" or "video/jxsv", see
-// nmos::media_types
-// const web::json::field_as_string_or video_type{U("video_type"),
-// U("video/raw")};
 } // namespace fields
-
-// nmos::interlace_mode get_interlace_mode(enum video_format video_format);
 
 // the different kinds of 'port' (standing for the format/media type/event type)
 // implemented by the example node each 'port' of the example node has a source,
@@ -159,10 +150,6 @@ std::vector<nmos::id> make_ids(const nmos::id &seed_id,
 utility::string_t make_source_specific_multicast_address_v4(const nmos::id &id,
                                                             int leg = 0);
 
-// add a selection of parents to a source or flow
-// void insert_parents(nmos::resource &resource, const nmos::id &seed_id,
-//                     const port &port, const std::string &id);
-
 // add a helpful suffix to the label of a sub-resource for the example node
 void set_label_description(nmos::resource &resource, const port &port,
                            std::string &id);
@@ -175,7 +162,6 @@ void insert_group_hint(nmos::resource &resource, const port &port,
 struct node_implementation_init_exception : public std::runtime_error {
     using std::runtime_error::runtime_error;
 };
-// #include "st_config_utils.h"
 namespace slog {
 class base_gate;
 }
@@ -188,5 +174,3 @@ struct node_implementation;
 struct control_protocol_state;
 } // namespace experimental
 } // namespace nmos
-
-#endif

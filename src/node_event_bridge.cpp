@@ -9,6 +9,31 @@ namespace seeder::nmos_node::internal
   {
   }
 
+  // ---- template publish_event_impl ----
+  template <typename Event, typename Handler>
+  void NodeEventBridge::publish_event_impl(const Event &event,
+                                            Handler &handler_store)
+  {
+    Handler handler;
+    {
+      std::lock_guard<std::mutex> lock(event_callback_mutex_);
+      handler = handler_store;
+    }
+    if (handler)
+    {
+      handler(event);
+    }
+  }
+
+  // explicit instantiations
+  template void NodeEventBridge::publish_event_impl(
+      const ReceiverEvent &, ReceiverEventHandler &);
+  template void NodeEventBridge::publish_event_impl(
+      const SenderEvent &, SenderEventHandler &);
+  template void NodeEventBridge::publish_event_impl(
+      const RegistrationEvent &, RegistrationEventHandler &);
+
+  // ---- set_update callbacks ----
   void NodeEventBridge::set_update_video_sender_callback(
       VideoSenderCallback func)
   {
@@ -51,21 +76,22 @@ namespace seeder::nmos_node::internal
     callbacks_.set_registration_changed_callback(std::move(func));
   }
 
+  // ---- set_*_event_handler (with wire-up helper) ----
   void NodeEventBridge::set_receiver_event_handler(ReceiverEventHandler handler)
   {
     std::lock_guard<std::mutex> lock(event_callback_mutex_);
     receiver_event_handler_ = std::move(handler);
     if (receiver_event_handler_)
     {
+      auto wire = [this](auto item) {
+        publish_event_impl(ReceiverEvent{item}, receiver_event_handler_);
+      };
       callbacks_.set_update_video_receiver_callback(
-          [this](const VideoReceiver &r)
-          { publish_event(ReceiverEvent{r}); });
+          [wire](const VideoReceiver &r) { wire(r); });
       callbacks_.set_update_audio_receiver_callback(
-          [this](const AudioReceiver &r)
-          { publish_event(ReceiverEvent{r}); });
+          [wire](const AudioReceiver &r) { wire(r); });
       callbacks_.set_update_ancillary_receiver_callback(
-          [this](const AncillaryReceiver &r)
-          { publish_event(ReceiverEvent{r}); });
+          [wire](const AncillaryReceiver &r) { wire(r); });
     }
   }
 
@@ -81,15 +107,15 @@ namespace seeder::nmos_node::internal
     sender_event_handler_ = std::move(handler);
     if (sender_event_handler_)
     {
+      auto wire = [this](auto item) {
+        publish_event_impl(SenderEvent{item}, sender_event_handler_);
+      };
       callbacks_.set_update_video_sender_callback(
-          [this](const VideoSender &s)
-          { publish_event(SenderEvent{s}); });
+          [wire](const VideoSender &s) { wire(s); });
       callbacks_.set_update_audio_sender_callback(
-          [this](const AudioSender &s)
-          { publish_event(SenderEvent{s}); });
+          [wire](const AudioSender &s) { wire(s); });
       callbacks_.set_update_ancillary_sender_callback(
-          [this](const AncillarySender &s)
-          { publish_event(SenderEvent{s}); });
+          [wire](const AncillarySender &s) { wire(s); });
     }
   }
 
@@ -101,47 +127,11 @@ namespace seeder::nmos_node::internal
     if (registration_event_handler_)
     {
       callbacks_.set_registration_changed_callback(
-          [this](const RegistrationStatus &status)
-          { publish_event(RegistrationEvent{status}); });
+          [this](const RegistrationStatus &status) {
+            publish_event_impl(RegistrationEvent{status},
+                               registration_event_handler_);
+          });
     }
   }
 
-  void NodeEventBridge::publish_event(const ReceiverEvent &event)
-  {
-    ReceiverEventHandler handler;
-    {
-      std::lock_guard<std::mutex> lock(event_callback_mutex_);
-      handler = receiver_event_handler_;
-    }
-    if (handler)
-    {
-      handler(event);
-    }
-  }
-
-  void NodeEventBridge::publish_event(const SenderEvent &event)
-  {
-    SenderEventHandler handler;
-    {
-      std::lock_guard<std::mutex> lock(event_callback_mutex_);
-      handler = sender_event_handler_;
-    }
-    if (handler)
-    {
-      handler(event);
-    }
-  }
-
-  void NodeEventBridge::publish_event(const RegistrationEvent &event)
-  {
-    RegistrationEventHandler handler;
-    {
-      std::lock_guard<std::mutex> lock(event_callback_mutex_);
-      handler = registration_event_handler_;
-    }
-    if (handler)
-    {
-      handler(event);
-    }
-  }
-}
+} // namespace seeder::nmos_node::internal
