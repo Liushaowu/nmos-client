@@ -158,7 +158,8 @@ void ConnectionResultWaiter::wait_for_result(
   if (!ready) {
     pending_.erase(request_id);
     throw std::runtime_error(std::to_string(timeout.count()) +
-                             "The Device connection timeout occurred!");
+                             "ms timeout waiting for connection result (request: " +
+                             request_id + ")");
   }
 
   const bool completed = pending->completed;
@@ -173,13 +174,15 @@ void ConnectionResultWaiter::wait_for_result(
       return;
     }
     if (reason.empty()) {
-      reason = "The destination device refused connection.";
+      reason = "The destination device refused connection (request: " +
+              request_id + ").";
     }
     throw std::runtime_error(reason);
   }
   if (canceled) {
     if (reason.empty()) {
-      reason = "The device has disconnected from the connection.";
+      reason = "The device has disconnected from the connection (request: " +
+              request_id + ").";
     }
     throw std::runtime_error(reason);
   }
@@ -417,7 +420,7 @@ void WsClient::run() {
       client->set_close_handler(
           [this](web::websockets::client::websocket_close_status,
                  const utility::string_t &, const std::error_code &) {
-            connected_ = false;
+            connection_closed_ = true;
             connection_results_.cancel_all("websocket disconnected");
           });
       client->connect(web::uri(to_t(ws_url_))).wait();
@@ -440,13 +443,14 @@ void WsClient::run() {
         on_connected();
       }
 
-      while (!stop_requested_ && connected_) {
+      while (!stop_requested_ && !connection_closed_) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }
     } catch (const std::exception &error) {
       report_error(error.what());
     }
 
+    connection_closed_ = false;
     const bool was_connected = connected_.exchange(false);
     {
       std::lock_guard<std::mutex> lock(client_mutex_);

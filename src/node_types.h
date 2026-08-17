@@ -22,6 +22,7 @@ namespace seeder
       std::string sender_id;
       std::string name;
       bool enable = false;
+      bool parent_enable = true;
       std::string video_format;
       std::string colorspace = "BT709";
       std::string transfer_characteristics = "SDR";
@@ -39,6 +40,7 @@ namespace seeder
       std::string name;
       std::string source_ip;
       bool enable = false;
+      bool parent_enable = true;
       int channel_count;
       int bit_depth;
       int sample_rate;
@@ -62,6 +64,7 @@ namespace seeder
       std::string ip;
       int port;
       bool enable = false;
+      bool parent_enable = true;
       Redundancy redundancy;
       VideoReceiverCaps caps;
       std::string format;
@@ -74,6 +77,7 @@ namespace seeder
       std::string id;
       std::string name;
       bool enable = false;
+      bool parent_enable = true;
       int channel_count;
       int bit_depth;
       int sample_rate;
@@ -92,6 +96,7 @@ namespace seeder
       std::string format;
       std::string source_ip;
       bool enable = false;
+      bool parent_enable = true;
       std::string ip;
       int port;
       Redundancy redundancy;
@@ -103,6 +108,7 @@ namespace seeder
       std::string name;
       std::string format;
       bool enable = false;
+      bool parent_enable = true;
       std::string ip;
       std::string source_ip;
       int port;

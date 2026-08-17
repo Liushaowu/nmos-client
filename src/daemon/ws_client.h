@@ -88,6 +88,7 @@ private:
   int heartbeat_timeout_ms_;
   std::atomic<bool> stop_requested_{false};
   std::atomic<bool> connected_{false};
+  std::atomic<bool> connection_closed_{false};
   std::thread receive_worker_;
   std::thread send_worker_;
   std::thread heartbeat_worker_;

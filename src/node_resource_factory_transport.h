@@ -24,7 +24,7 @@ namespace seeder::nmos_node::internal::resource_factory_detail
   inline void set_receiver_transport_params_leg(
       web::json::value &endpoint, const std::size_t leg_index,
       const std::string &multicast_ip, const std::string &interface_ip,
-      const int destination_port)
+      const int destination_port, const bool rtp_enabled)
   {
     endpoint[nmos::fields::transport_params][leg_index]
             [nmos::fields::multicast_ip] =
@@ -34,17 +34,20 @@ namespace seeder::nmos_node::internal::resource_factory_detail
                 web::json::value::string(utility::s2us(interface_ip));
     endpoint[nmos::fields::transport_params][leg_index]
             [nmos::fields::destination_port] = destination_port;
+    endpoint[nmos::fields::transport_params][leg_index]
+            [nmos::fields::rtp_enabled] =
+                web::json::value::boolean(rtp_enabled);
   }
 
   inline void initialize_receiver_transport_params(
       web::json::value &staged, web::json::value &active,
       const std::string &multicast_ip, const std::string &interface_ip,
-      const int destination_port)
+      const int destination_port, const bool stream_enable = false)
   {
     set_receiver_transport_params_leg(staged, 0, multicast_ip, interface_ip,
-                                      destination_port);
+                                      destination_port, stream_enable);
     set_receiver_transport_params_leg(active, 0, multicast_ip, interface_ip,
-                                      destination_port);
+                                      destination_port, stream_enable);
   }
 
   inline void initialize_receiver_transport_params(
@@ -52,24 +55,30 @@ namespace seeder::nmos_node::internal::resource_factory_detail
       const std::string &multicast_ip, const std::string &interface_ip,
       const int destination_port, const std::string &secondary_multicast_ip,
       const std::string &secondary_interface_ip,
-      const int secondary_destination_port)
+      const int secondary_destination_port,
+      const bool stream_enable = false,
+      const bool redundancy_enable = false)
   {
     initialize_receiver_transport_params(staged, active, multicast_ip,
-                                         interface_ip, destination_port);
+                                         interface_ip, destination_port,
+                                         stream_enable);
     set_receiver_transport_params_leg(staged, 1, secondary_multicast_ip,
                                       secondary_interface_ip,
-                                      secondary_destination_port);
+                                      secondary_destination_port,
+                                      redundancy_enable);
     set_receiver_transport_params_leg(active, 1, secondary_multicast_ip,
                                       secondary_interface_ip,
-                                      secondary_destination_port);
+                                      secondary_destination_port,
+                                      redundancy_enable);
   }
 
   inline void set_sender_endpoint_enable(web::json::value &endpoint,
+                                         const bool master_enabled,
                                          const bool primary_enabled,
                                          const bool secondary_enabled)
   {
     endpoint[nmos::fields::master_enable] =
-        web::json::value::boolean(primary_enabled);
+        web::json::value::boolean(master_enabled);
     auto &transport_params = endpoint[nmos::fields::transport_params];
     if (!transport_params.is_array())
     {
@@ -91,11 +100,12 @@ namespace seeder::nmos_node::internal::resource_factory_detail
 
   inline void initialize_sender_endpoint_enable(web::json::value &staged,
                                                 web::json::value &active,
+                                                const bool master_enabled,
                                                 const bool stream_enabled,
                                                 const bool redundancy_enabled)
   {
     const bool secondary_enabled = stream_enabled && redundancy_enabled;
-    set_sender_endpoint_enable(staged, stream_enabled, secondary_enabled);
-    set_sender_endpoint_enable(active, stream_enabled, secondary_enabled);
+    set_sender_endpoint_enable(staged, master_enabled, stream_enabled, secondary_enabled);
+    set_sender_endpoint_enable(active, master_enabled, stream_enabled, secondary_enabled);
   }
 }

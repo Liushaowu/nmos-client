@@ -135,7 +135,9 @@ namespace seeder::nmos_node::internal::resource_factory_detail
     {
       names.push_back(selection.primary.interface.name);
     }
-    if (redundancy_enabled && selection.redundancy.selected)
+    if (redundancy_enabled && selection.redundancy.selected &&
+        (!selection.primary.selected ||
+         selection.redundancy.interface.name != selection.primary.interface.name))
     {
       names.push_back(selection.redundancy.interface.name);
     }

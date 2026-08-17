@@ -41,18 +41,15 @@ namespace seeder::nmos_node::internal
         seeder::core::video_format_desc::get(video.video_format);
     if (format_desc.is_invalid())
     {
-      throw node_implementation_init_exception(
-          "invalid video sender video_format: " + video.video_format);
+      format_desc = seeder::core::video_format_desc::get("1080p50");
     }
-    if (video.pg_format < 0 ||
-        video.pg_format >= static_cast<int>(ST20_FMT_MAX))
-    {
-      throw node_implementation_init_exception(
-          "invalid video sender pg_format: " + std::to_string(video.pg_format));
-    }
+    const st20_fmt pg_fmt = (video.pg_format >= 0 &&
+                             video.pg_format < static_cast<int>(ST20_FMT_MAX))
+                                ? static_cast<st20_fmt>(video.pg_format)
+                                : ST20_FMT_YUV_422_10BIT;
 
-    const auto sampling = st_get_color_sampling((st20_fmt)video.pg_format);
-    const auto bit_depth = st_get_component_depth((st20_fmt)video.pg_format);
+    const auto sampling = st_get_color_sampling(pg_fmt);
+    const auto bit_depth = st_get_component_depth(pg_fmt);
     const auto source_id = impl::make_id(
         seed_id_, nmos::types::source, impl::ports::video, id);
     const auto flow_id = impl::make_id(
@@ -92,7 +89,7 @@ namespace seeder::nmos_node::internal
         sender_id, flow_id, nmos::transports::rtp_mcast, device_id_,
         manifest_href.to_string(), interface_names, settings_);
     impl::set_label_description(sender, impl::ports::video, name);
-    impl::insert_group_hint(sender, impl::ports::video, id, name);
+    impl::insert_group_hint(sender, impl::ports::video, video.name);
 
     auto connection_sender =
         nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
@@ -107,8 +104,8 @@ namespace seeder::nmos_node::internal
     }
     auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
     auto &active = connection_sender.data[nmos::fields::endpoint_active];
-    initialize_sender_endpoint_enable(staged, active, video.enable,
-                                      video.redundancy.enable);
+    initialize_sender_endpoint_enable(staged, active, video.parent_enable, video.enable,
+                                      video.redundancy.present ? video.redundancy.enable : false);
     staged[nmos::fields::activation] =
         value_of({{nmos::fields::mode,
                    nmos::activation_modes::activate_scheduled_relative.name},
@@ -144,10 +141,10 @@ namespace seeder::nmos_node::internal
     nmos::resource source = nmos::make_audio_source(
         source_id, device_id_, nmos::clock_names::clk0, frame_rate, channels,
         settings_);
-    impl::set_label_description(source, port, name);
+    impl::set_label_description(source, impl::ports::audio, name);
     nmos::resource flow = nmos::make_raw_audio_flow(
         flow_id, source_id, device_id_, frame_rate, audio.bit_depth, settings_);
-    impl::set_label_description(flow, port, name);
+    impl::set_label_description(flow, impl::ports::audio, name);
 
     const auto manifest_href =
         nmos::experimental::make_manifest_api_manifest(sender_id, settings_);
@@ -159,8 +156,8 @@ namespace seeder::nmos_node::internal
     auto sender = nmos::make_sender(
         sender_id, flow_id, nmos::transports::rtp_mcast, device_id_,
         manifest_href.to_string(), interface_names, settings_);
-    impl::set_label_description(sender, port, name);
-    impl::insert_group_hint(sender, port, id, name);
+    impl::set_label_description(sender, impl::ports::audio, name);
+    impl::insert_group_hint(sender, impl::ports::audio, audio.name);
 
     auto connection_sender =
         nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
@@ -175,8 +172,8 @@ namespace seeder::nmos_node::internal
     }
     auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
     auto &active = connection_sender.data[nmos::fields::endpoint_active];
-    initialize_sender_endpoint_enable(staged, active, audio.enable,
-                                      audio.redundancy.enable);
+    initialize_sender_endpoint_enable(staged, active, audio.parent_enable, audio.enable,
+                                      audio.redundancy.present ? audio.redundancy.enable : false);
     staged[nmos::fields::activation] =
         value_of({{nmos::fields::mode,
                    nmos::activation_modes::activate_scheduled_relative.name},
@@ -216,11 +213,10 @@ namespace seeder::nmos_node::internal
 
     nmos::resource source = nmos::make_data_source(
         source_id, device_id_, nmos::clock_names::clk0, grain_rate, settings_);
-    impl::set_label_description(source, port, name);
+impl::set_label_description(source, impl::ports::data, name);
     nmos::resource flow = nmos::make_sdianc_data_flow(
         flow_id, source_id, device_id_, settings_);
-    flow.data[nmos::fields::grain_rate] = nmos::make_rational(grain_rate);
-    impl::set_label_description(flow, port, name);
+    impl::set_label_description(flow, impl::ports::data, name);
 
     const auto manifest_href =
         nmos::experimental::make_manifest_api_manifest(sender_id, settings_);
@@ -233,8 +229,8 @@ namespace seeder::nmos_node::internal
     auto sender = nmos::make_sender(
         sender_id, flow_id, nmos::transports::rtp_mcast, device_id_,
         manifest_href.to_string(), interface_names, settings_);
-    impl::set_label_description(sender, port, name);
-    impl::insert_group_hint(sender, port, id, name);
+    impl::set_label_description(sender, impl::ports::data, name);
+    impl::insert_group_hint(sender, impl::ports::data, ancillary.name);
 
     auto connection_sender =
         nmos::make_connection_rtp_sender(sender_id, ST_2022_7);
@@ -249,8 +245,8 @@ namespace seeder::nmos_node::internal
     }
     auto &staged = connection_sender.data[nmos::fields::endpoint_staged];
     auto &active = connection_sender.data[nmos::fields::endpoint_active];
-    initialize_sender_endpoint_enable(staged, active, ancillary.enable,
-                                      ancillary.redundancy.enable);
+    initialize_sender_endpoint_enable(staged, active, ancillary.parent_enable, ancillary.enable,
+                                      ancillary.redundancy.present ? ancillary.redundancy.enable : false);
     staged[nmos::fields::activation] =
         value_of({{nmos::fields::mode,
                    nmos::activation_modes::activate_scheduled_relative.name},

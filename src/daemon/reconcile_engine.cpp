@@ -20,7 +20,7 @@ web::hosts::experimental::host_interface device_to_interface(
   return web::hosts::experimental::host_interface(
       static_cast<std::uint32_t>(device.id),
       utility::conversions::to_string_t(device.display_name),
-      utility::conversions::to_string_t(device.device), addresses, U("."));
+      utility::conversions::to_string_t(device.mac), addresses, U("."));
 }
 
 template <typename T>

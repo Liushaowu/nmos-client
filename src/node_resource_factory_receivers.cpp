@@ -117,7 +117,7 @@ namespace seeder::nmos_node::internal
         receiver.data[nmos::fields::caps][nmos::fields::version] =
             value(nmos::make_version());
     impl::set_label_description(receiver, impl::ports::video, name);
-    impl::insert_group_hint(receiver, impl::ports::video, id, name);
+    impl::insert_group_hint(receiver, impl::ports::video, video.name);
 
     auto connection_receiver =
         nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
@@ -126,13 +126,15 @@ namespace seeder::nmos_node::internal
         interface_address_constraint(interface_selection.primary);
     auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
     auto &active = connection_receiver.data[nmos::fields::endpoint_active];
-    staged[nmos::fields::master_enable] = value::boolean(true);
-    active[nmos::fields::master_enable] = value::boolean(true);
+    staged[nmos::fields::master_enable] = value::boolean(video.parent_enable);
+    active[nmos::fields::master_enable] = value::boolean(video.parent_enable);
     if (ST_2022_7)
     {
       initialize_receiver_transport_params(
           staged, active, video.ip, primary_interface_ip, video.port,
-          secondary_multicast_ip, secondary_interface_ip, secondary_port);
+          secondary_multicast_ip, secondary_interface_ip, secondary_port,
+          video.enable,
+          video.redundancy.enable);
       connection_receiver.data[nmos::fields::endpoint_constraints][1]
                               [nmos::fields::interface_ip] =
           interface_address_constraint(interface_selection.redundancy);
@@ -140,7 +142,8 @@ namespace seeder::nmos_node::internal
     else
     {
       initialize_receiver_transport_params(staged, active, video.ip,
-                                           primary_interface_ip, video.port);
+                                           primary_interface_ip, video.port,
+                                           video.enable);
     }
 
     return {std::move(receiver), std::move(connection_receiver)};
@@ -168,7 +171,7 @@ namespace seeder::nmos_node::internal
         receiver_id, device_id_, nmos::transports::rtp_mcast,
         interface_names, audio.bit_depth, settings_);
     impl::set_label_description(receiver, impl::ports::audio, name);
-    impl::insert_group_hint(receiver, impl::ports::audio, id, name);
+    impl::insert_group_hint(receiver, impl::ports::audio, audio.name);
 
     auto connection_receiver =
         nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
@@ -177,13 +180,15 @@ namespace seeder::nmos_node::internal
         interface_address_constraint(interface_selection.primary);
     auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
     auto &active = connection_receiver.data[nmos::fields::endpoint_active];
-    staged[nmos::fields::master_enable] = value::boolean(true);
-    active[nmos::fields::master_enable] = value::boolean(true);
+    staged[nmos::fields::master_enable] = value::boolean(audio.parent_enable);
+    active[nmos::fields::master_enable] = value::boolean(audio.parent_enable);
     if (ST_2022_7)
     {
       initialize_receiver_transport_params(
           staged, active, audio.ip, primary_interface_ip, audio.port,
-          secondary_multicast_ip, secondary_interface_ip, secondary_port);
+          secondary_multicast_ip, secondary_interface_ip, secondary_port,
+          audio.enable,
+          audio.redundancy.enable);
       connection_receiver.data[nmos::fields::endpoint_constraints][1]
                               [nmos::fields::interface_ip] =
           interface_address_constraint(interface_selection.redundancy);
@@ -191,7 +196,8 @@ namespace seeder::nmos_node::internal
     else
     {
       initialize_receiver_transport_params(staged, active, audio.ip,
-                                           primary_interface_ip, audio.port);
+                                           primary_interface_ip, audio.port,
+                                           audio.enable);
     }
 
     return {std::move(receiver), std::move(connection_receiver)};
@@ -223,7 +229,7 @@ namespace seeder::nmos_node::internal
         receiver.data[nmos::fields::caps][nmos::fields::version] =
             value(nmos::make_version());
     impl::set_label_description(receiver, impl::ports::data, name);
-    impl::insert_group_hint(receiver, impl::ports::data, id, name);
+    impl::insert_group_hint(receiver, impl::ports::data, ancillary.name);
 
     auto connection_receiver =
         nmos::make_connection_rtp_receiver(receiver_id, ST_2022_7);
@@ -232,14 +238,15 @@ namespace seeder::nmos_node::internal
         interface_address_constraint(interface_selection.primary);
     auto &staged = connection_receiver.data[nmos::fields::endpoint_staged];
     auto &active = connection_receiver.data[nmos::fields::endpoint_active];
-    staged[nmos::fields::master_enable] = value::boolean(true);
-    active[nmos::fields::master_enable] = value::boolean(true);
+    staged[nmos::fields::master_enable] = value::boolean(ancillary.parent_enable);
+    active[nmos::fields::master_enable] = value::boolean(ancillary.parent_enable);
     if (ST_2022_7)
     {
       initialize_receiver_transport_params(
           staged, active, ancillary.ip, primary_interface_ip,
           ancillary.port, secondary_multicast_ip, secondary_interface_ip,
-          secondary_port);
+          secondary_port, ancillary.enable,
+          ancillary.redundancy.enable);
       connection_receiver.data[nmos::fields::endpoint_constraints][1]
                               [nmos::fields::interface_ip] =
           interface_address_constraint(interface_selection.redundancy);
@@ -248,7 +255,7 @@ namespace seeder::nmos_node::internal
     {
       initialize_receiver_transport_params(staged, active, ancillary.ip,
                                            primary_interface_ip,
-                                           ancillary.port);
+                                           ancillary.port, ancillary.enable);
     }
 
     return {std::move(receiver), std::move(connection_receiver)};

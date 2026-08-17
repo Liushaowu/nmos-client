@@ -155,8 +155,10 @@ void set_label_description(nmos::resource &resource, const port &port,
                            std::string &id);
 
 // add an example "natural grouping" hint to a sender or receiver
+// group_name:  user-defined group identifier (e.g. struct.name)
+// index:      sequence number within the group (1-based), default 1
 void insert_group_hint(nmos::resource &resource, const port &port,
-                       std::string &id, std::string &name);
+                       const std::string &group_name, int index = 1);
 } // namespace impl
 
 struct node_implementation_init_exception : public std::runtime_error {

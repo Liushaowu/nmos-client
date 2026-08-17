@@ -521,9 +521,9 @@ namespace
         web::json::value::string(nmos::activation_modes::activate_immediate.name);
     endpoint[nmos::fields::transport_params] = web::json::value::array(1);
     endpoint[nmos::fields::transport_params][0][nmos::fields::interface_ip] =
-        web::json::value::string(U("192.0.2.10"));
+        web::json::value::string(U("192.0.0.1"));
     endpoint[nmos::fields::transport_params][0][nmos::fields::multicast_ip] =
-        web::json::value::string(U("239.1.1.1"));
+        web::json::value::string(U("0.0.0.0"));
     endpoint[nmos::fields::transport_params][0][nmos::fields::destination_port] =
         web::json::value::number(5004);
     endpoint[nmos::fields::transport_params][0][nmos::fields::rtp_enabled] =
@@ -605,8 +605,8 @@ namespace
           const auto *video = std::get_if<VideoReceiver>(&event.payload);
           assert(video);
           assert(video->enable);
-          assert("192.0.2.10" == video->source_ip);
-          assert("239.1.1.1" == video->ip);
+          assert("192.0.0.1" == video->source_ip);
+          assert("0.0.0.0" == video->ip);
           assert(5004 == video->port);
           throw std::runtime_error("backend rejected receiver activation");
         });

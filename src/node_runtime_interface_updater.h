@@ -5,6 +5,8 @@
 #include "node_stream_store.h"
 
 #include <nmos/model.h>
+#include <nmos/id.h>
+#include <nmos/log_gate.h>
 
 #include <mutex>
 #include <vector>
@@ -21,6 +23,8 @@ namespace seeder::nmos_node::internal
     nmos::node_model &node_model;
     nmos::connection_sender_transportfile_setter &set_transportfile;
     NodeResourceController &resource_controller;
+    const nmos::id &node_id;
+    nmos::experimental::log_gate **gate;
   };
 
   class NodeRuntimeInterfaceUpdater
@@ -50,6 +54,7 @@ namespace seeder::nmos_node::internal
     void refresh_resources(const SenderSnapshot &senders,
                            const ReceiverSnapshot &receivers);
     void refresh_transportfiles();
+    void refresh_node_interfaces();
 
     RuntimeInterfaces &runtime_interfaces_;
     std::mutex &runtime_interfaces_mutex_;
@@ -59,5 +64,7 @@ namespace seeder::nmos_node::internal
     nmos::node_model &node_model_;
     nmos::connection_sender_transportfile_setter &set_transportfile_;
     NodeResourceController &resource_controller_;
+    const nmos::id &node_id_;
+    nmos::experimental::log_gate **gate_;
   };
 }

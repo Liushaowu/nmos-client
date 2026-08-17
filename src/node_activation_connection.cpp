@@ -53,6 +53,27 @@ namespace seeder::nmos_node::internal
       std::error_code ec{};
       const bool has_secondary_transport_param = transport_params.size() > 1;
 
+      // 安全提取 transport_param 字段，避免非 string 类型时 .as_string() 抛异常
+      auto safe_tp_string = [](const web::json::value &tp,
+                               const utility::string_t &field) -> std::string
+      {
+        if (!tp.is_object() || !tp.has_field(field)) return {};
+        const auto &val = tp.at(field);
+        if (val.is_string()) return utility::us2s(val.as_string());
+        if (val.is_integer()) return std::to_string(val.as_integer());
+        return {};
+      };
+      auto safe_tp_int = [](const web::json::value &tp,
+                            const utility::string_t &field,
+                            int fallback = 0) -> int
+      {
+        if (!tp.is_object() || !tp.has_field(field)) return fallback;
+        const auto &val = tp.at(field);
+        if (val.is_integer()) return val.as_integer();
+        if (val.is_number()) return static_cast<int>(val.as_double());
+        return fallback;
+      };
+
       // ---- generic lambda: fill common transport fields into any item ----
       auto fill_snapshot = [&](auto *item, const std::string &primary_ip,
                                 const std::string &primary_dest_ip, int primary_port)
@@ -90,195 +111,272 @@ namespace seeder::nmos_node::internal
 
       if (resource.type == nmos::types::receiver)
       {
-        const auto &transport_file = nmos::fields::transport_file(endpoint_active);
-        int dest_port =
-            nmos::fields::destination_port(transport_params.at(0)).as_integer();
-        std::string interface_ip = utility::us2s(
-            nmos::fields::interface_ip(transport_params.at(0)).as_string());
-        std::string multicast_ip = utility::us2s(
-            nmos::fields::multicast_ip(transport_params.at(0)).as_string());
-        std::string source_ip = utility::us2s(
-            nmos::fields::source_ip(transport_params.at(0)).as_string());
-
-        int dest_port_07 = 5004;
-        std::string interface_ip_07 = "";
-        std::string multicast_ip_07 = "";
-        std::string source_ip_07 = "";
-        bool redundancy_enable = false;
-        if (has_secondary_transport_param)
+        if (!master_enable)
         {
-          dest_port_07 = nmos::fields::destination_port(transport_params.at(1))
-                             .as_integer();
-          interface_ip_07 = utility::us2s(
-              nmos::fields::interface_ip(transport_params.at(1)).as_string());
-          multicast_ip_07 = utility::us2s(
-              nmos::fields::multicast_ip(transport_params.at(1)).as_string());
-          source_ip_07 = utility::us2s(
-              nmos::fields::source_ip(transport_params.at(1)).as_string());
-          redundancy_enable = NodeSdpService::transport_param_rtp_enabled(
-              transport_params.at(1), false);
+          std::optional<VideoReceiver> video_snapshot;
+          std::optional<AudioReceiver> audio_snapshot;
+          std::optional<AncillaryReceiver> ancillary_snapshot;
+
+          {
+            std::lock_guard<std::mutex> receiver_lock(ctx.receiver_mutex);
+            VideoReceiver *video =
+                ctx.stream_store.find_video_receiver_by_resource_id(resource.id);
+            if (video)
+            {
+              video->enable = false;
+              video_snapshot = *video;
+            }
+            AudioReceiver *audio =
+                ctx.stream_store.find_audio_receiver_by_resource_id(resource.id);
+            if (audio)
+            {
+              audio->enable = false;
+              audio_snapshot = *audio;
+            }
+            AncillaryReceiver *ancillary =
+                ctx.stream_store.find_ancillary_receiver_by_resource_id(resource.id);
+            if (ancillary)
+            {
+              ancillary_snapshot = *ancillary;
+            }
+          }
+
+          auto callbacks = ctx.callbacks.receiver_callbacks();
+          dispatch_callback(video_snapshot, callbacks.video, "video receiver");
+          dispatch_callback(audio_snapshot, callbacks.audio, "audio receiver");
+          dispatch_callback(ancillary_snapshot, callbacks.ancillary, "ancillary receiver");
         }
-
-        std::optional<VideoReceiver> video_snapshot;
-        std::optional<AudioReceiver> audio_snapshot;
-        std::optional<AncillaryReceiver> ancillary_snapshot;
-        CallbackDispatcher::ReceiverCallbacks callbacks;
-
+        else
         {
-          std::lock_guard<std::mutex> receiver_lock(ctx.receiver_mutex);
-          VideoReceiver *video =
-              ctx.stream_store.find_video_receiver_by_resource_id(resource.id);
-          AudioReceiver *audio =
-              ctx.stream_store.find_audio_receiver_by_resource_id(resource.id);
-          AncillaryReceiver *ancillary =
-              ctx.stream_store.find_ancillary_receiver_by_resource_id(resource.id);
+          const auto &transport_file = nmos::fields::transport_file(endpoint_active);
+          int dest_port =
+              safe_tp_int(transport_params.at(0), nmos::fields::destination_port);
+          std::string interface_ip =
+              safe_tp_string(transport_params.at(0), nmos::fields::interface_ip);
+          std::string multicast_ip =
+              safe_tp_string(transport_params.at(0), nmos::fields::multicast_ip);
+          std::string source_ip =
+              safe_tp_string(transport_params.at(0), nmos::fields::source_ip);
 
-          fill_snapshot(video, interface_ip, multicast_ip, dest_port);
-          if (video && video->redundancy.present && has_secondary_transport_param)
+          int dest_port_07 = 5004;
+          std::string interface_ip_07 = "";
+          std::string multicast_ip_07 = "";
+          std::string source_ip_07 = "";
+          bool redundancy_enable = false;
+          if (has_secondary_transport_param)
           {
-            video->redundancy.enable = redundancy_enable;
-            video->redundancy.source_ip = interface_ip_07;
-            video->redundancy.ip = multicast_ip_07;
-            video->redundancy.port = dest_port_07;
-          }
-          if (video)
-          {
-            NodeSdpService::update_video_receiver_from_transport_file(
-                *video, transport_file, *ctx.gate);
-            video_snapshot = *video;
-          }
-
-          fill_snapshot(audio, interface_ip, multicast_ip, dest_port);
-          if (audio && audio->redundancy.present && has_secondary_transport_param)
-          {
-            audio->redundancy.enable = redundancy_enable;
-            audio->redundancy.source_ip = interface_ip_07;
-            audio->redundancy.ip = multicast_ip_07;
-            audio->redundancy.port = dest_port_07;
-          }
-          if (audio)
-          {
-            NodeSdpService::update_audio_receiver_from_transport_file(
-                *audio, transport_file, *ctx.gate);
-            audio_snapshot = *audio;
+            dest_port_07 =
+                safe_tp_int(transport_params.at(1), nmos::fields::destination_port, 5004);
+            interface_ip_07 =
+                safe_tp_string(transport_params.at(1), nmos::fields::interface_ip);
+            multicast_ip_07 =
+                safe_tp_string(transport_params.at(1), nmos::fields::multicast_ip);
+            source_ip_07 =
+                safe_tp_string(transport_params.at(1), nmos::fields::source_ip);
+            redundancy_enable = NodeSdpService::transport_param_rtp_enabled(
+                transport_params.at(1), false);
           }
 
-          fill_snapshot(ancillary, interface_ip, multicast_ip, dest_port);
-          if (ancillary && ancillary->redundancy.present && has_secondary_transport_param)
+          std::optional<VideoReceiver> video_snapshot;
+          std::optional<AudioReceiver> audio_snapshot;
+          std::optional<AncillaryReceiver> ancillary_snapshot;
+          CallbackDispatcher::ReceiverCallbacks callbacks;
+
           {
-            ancillary->redundancy.enable = redundancy_enable;
-            ancillary->redundancy.source_ip = interface_ip_07;
-            ancillary->redundancy.ip = multicast_ip_07;
-            ancillary->redundancy.port = dest_port_07;
+            std::lock_guard<std::mutex> receiver_lock(ctx.receiver_mutex);
+            VideoReceiver *video =
+                ctx.stream_store.find_video_receiver_by_resource_id(resource.id);
+            AudioReceiver *audio =
+                ctx.stream_store.find_audio_receiver_by_resource_id(resource.id);
+            AncillaryReceiver *ancillary =
+                ctx.stream_store.find_ancillary_receiver_by_resource_id(resource.id);
+
+            fill_snapshot(video, interface_ip, multicast_ip, dest_port);
+            if (video && video->redundancy.present && has_secondary_transport_param)
+            {
+              video->redundancy.enable = redundancy_enable;
+              video->redundancy.source_ip = interface_ip_07;
+              video->redundancy.ip = multicast_ip_07;
+              video->redundancy.port = dest_port_07;
+            }
+            if (video)
+            {
+              NodeSdpService::update_video_receiver_from_transport_file(
+                  *video, transport_file, *ctx.gate);
+              video_snapshot = *video;
+            }
+
+            fill_snapshot(audio, interface_ip, multicast_ip, dest_port);
+            if (audio && audio->redundancy.present && has_secondary_transport_param)
+            {
+              audio->redundancy.enable = redundancy_enable;
+              audio->redundancy.source_ip = interface_ip_07;
+              audio->redundancy.ip = multicast_ip_07;
+              audio->redundancy.port = dest_port_07;
+            }
+            if (audio)
+            {
+              NodeSdpService::update_audio_receiver_from_transport_file(
+                  *audio, transport_file, *ctx.gate);
+              audio_snapshot = *audio;
+            }
+
+            fill_snapshot(ancillary, interface_ip, multicast_ip, dest_port);
+            if (ancillary && ancillary->redundancy.present && has_secondary_transport_param)
+            {
+              ancillary->redundancy.enable = redundancy_enable;
+              ancillary->redundancy.source_ip = interface_ip_07;
+              ancillary->redundancy.ip = multicast_ip_07;
+              ancillary->redundancy.port = dest_port_07;
+            }
+            ancillary_snapshot = ancillary ? std::optional(*ancillary) : std::nullopt;
           }
-          ancillary_snapshot = ancillary ? std::optional(*ancillary) : std::nullopt;
+
+          callbacks = ctx.callbacks.receiver_callbacks();
+
+          dispatch_callback(video_snapshot, callbacks.video, "video receiver");
+          dispatch_callback(audio_snapshot, callbacks.audio, "audio receiver");
+          dispatch_callback(ancillary_snapshot, callbacks.ancillary, "ancillary receiver");
         }
-
-        callbacks = ctx.callbacks.receiver_callbacks();
-
-        dispatch_callback(video_snapshot, callbacks.video, "video receiver");
-        dispatch_callback(audio_snapshot, callbacks.audio, "audio receiver");
-        dispatch_callback(ancillary_snapshot, callbacks.ancillary, "ancillary receiver");
       }
       else if (resource.type == nmos::types::sender)
       {
-        int dest_port = 0;
-        std::string destination_ip;
-        std::string source_ip;
-
-        int dest_port_07 = 5004;
-        std::string destination_ip_07 = "";
-        std::string source_ip_07 = "";
-        bool redundancy_enable = false;
-        try
+        if (!master_enable)
         {
-          dest_port =
-              nmos::fields::destination_port(transport_params.at(0)).as_integer();
-          destination_ip = utility::us2s(
-              nmos::fields::destination_ip(transport_params.at(0)).as_string());
-          source_ip = utility::us2s(
-              nmos::fields::source_ip(transport_params.at(0)).as_string());
-          if (dest_port < 0 || 65535 < dest_port)
-          {
-            throw std::runtime_error("destination_port out of range");
-          }
+          std::optional<VideoSender> video_snapshot;
+          std::optional<AudioSender> audio_snapshot;
+          std::optional<AncillarySender> ancillary_snapshot;
 
-          if (has_secondary_transport_param)
           {
-            dest_port_07 = nmos::fields::destination_port(transport_params.at(1))
-                               .as_integer();
-            destination_ip_07 = utility::us2s(
-                nmos::fields::destination_ip(transport_params.at(1)).as_string());
-            source_ip_07 = utility::us2s(
-                nmos::fields::source_ip(transport_params.at(1)).as_string());
-            redundancy_enable = NodeSdpService::transport_param_rtp_enabled(
-                transport_params.at(1), false);
-            if (dest_port_07 < 0 || 65535 < dest_port_07)
+            std::lock_guard<std::mutex> sender_lock(ctx.sender_mutex);
+            const auto sender_id = utility::us2s(resource.id);
+            VideoSender *video =
+                ctx.stream_store.find_video_sender_by_sender_id(sender_id);
+            if (video)
             {
-              throw std::runtime_error("secondary destination_port out of range");
+              video->enable = false;
+              video_snapshot = *video;
+            }
+            AudioSender *audio =
+                ctx.stream_store.find_audio_sender_by_sender_id(sender_id);
+            if (audio)
+            {
+              audio->enable = false;
+              audio_snapshot = *audio;
+            }
+            AncillarySender *ancillary =
+                ctx.stream_store.find_ancillary_sender_by_sender_id(sender_id);
+            if (ancillary)
+            {
+              ancillary_snapshot = *ancillary;
             }
           }
+
+          auto callbacks = ctx.callbacks.sender_callbacks();
+          dispatch_callback(video_snapshot, callbacks.video, "video sender");
+          dispatch_callback(audio_snapshot, callbacks.audio, "audio sender");
+          dispatch_callback(ancillary_snapshot, callbacks.ancillary, "ancillary sender");
         }
-        catch (const std::exception &error)
+        else
         {
-          slog::log<slog::severities::error>(*ctx.gate, SLOG_FLF)
-              << nmos::stash_category(impl::categories::node_implementation)
-              << "connection activation ignored: invalid sender transport_params for "
-              << id_type << ": " << error.what();
-          return;
+          int dest_port = 0;
+          std::string destination_ip;
+          std::string source_ip;
+
+          int dest_port_07 = 5004;
+          std::string destination_ip_07 = "";
+          std::string source_ip_07 = "";
+          bool redundancy_enable = false;
+try
+            {
+              dest_port =
+                  safe_tp_int(transport_params.at(0), nmos::fields::destination_port);
+              destination_ip =
+                  safe_tp_string(transport_params.at(0), nmos::fields::destination_ip);
+              source_ip =
+                  safe_tp_string(transport_params.at(0), nmos::fields::source_ip);
+              if (dest_port < 0 || 65535 < dest_port)
+              {
+                throw std::runtime_error("destination_port out of range");
+              }
+
+              if (has_secondary_transport_param)
+              {
+                dest_port_07 =
+                    safe_tp_int(transport_params.at(1), nmos::fields::destination_port, 5004);
+                destination_ip_07 =
+                    safe_tp_string(transport_params.at(1), nmos::fields::destination_ip);
+                source_ip_07 =
+                    safe_tp_string(transport_params.at(1), nmos::fields::source_ip);
+                redundancy_enable = NodeSdpService::transport_param_rtp_enabled(
+                    transport_params.at(1), false);
+                if (dest_port_07 < 0 || 65535 < dest_port_07)
+                {
+                  throw std::runtime_error("secondary destination_port out of range");
+                }
+              }
+            }
+          catch (const std::exception &error)
+          {
+            slog::log<slog::severities::error>(*ctx.gate, SLOG_FLF)
+                << nmos::stash_category(impl::categories::node_implementation)
+                << "connection activation ignored: invalid sender transport_params for "
+                << id_type << ": " << error.what();
+            return;
+          }
+
+          std::optional<VideoSender> video_snapshot;
+          std::optional<AudioSender> audio_snapshot;
+          std::optional<AncillarySender> ancillary_snapshot;
+          CallbackDispatcher::SenderCallbacks callbacks;
+
+          {
+            std::lock_guard<std::mutex> sender_lock(ctx.sender_mutex);
+            const auto sender_id = utility::us2s(resource.id);
+            VideoSender *video =
+                ctx.stream_store.find_video_sender_by_sender_id(sender_id);
+            AudioSender *audio =
+                ctx.stream_store.find_audio_sender_by_sender_id(sender_id);
+            AncillarySender *ancillary =
+                ctx.stream_store.find_ancillary_sender_by_sender_id(sender_id);
+
+            fill_snapshot(video, source_ip, destination_ip, dest_port);
+            if (video && video->redundancy.present && has_secondary_transport_param)
+            {
+              video->redundancy.enable = redundancy_enable;
+              video->redundancy.source_ip = source_ip_07;
+              video->redundancy.ip = destination_ip_07;
+              video->redundancy.port = dest_port_07;
+            }
+            video_snapshot = video ? std::optional(*video) : std::nullopt;
+
+            fill_snapshot(audio, source_ip, destination_ip, dest_port);
+            if (audio && audio->redundancy.present && has_secondary_transport_param)
+            {
+              audio->redundancy.enable = redundancy_enable;
+              audio->redundancy.source_ip = source_ip_07;
+              audio->redundancy.ip = destination_ip_07;
+              audio->redundancy.port = dest_port_07;
+            }
+            audio_snapshot = audio ? std::optional(*audio) : std::nullopt;
+
+            fill_snapshot(ancillary, source_ip, destination_ip, dest_port);
+            if (ancillary && ancillary->redundancy.present && has_secondary_transport_param)
+            {
+              ancillary->redundancy.enable = redundancy_enable;
+              ancillary->redundancy.source_ip = source_ip_07;
+              ancillary->redundancy.ip = destination_ip_07;
+              ancillary->redundancy.port = dest_port_07;
+            }
+            ancillary_snapshot = ancillary ? std::optional(*ancillary) : std::nullopt;
+          }
+
+          callbacks = ctx.callbacks.sender_callbacks();
+
+          dispatch_callback(video_snapshot, callbacks.video, "video sender");
+          dispatch_callback(audio_snapshot, callbacks.audio, "audio sender");
+          dispatch_callback(ancillary_snapshot, callbacks.ancillary, "ancillary sender");
         }
-
-        std::optional<VideoSender> video_snapshot;
-        std::optional<AudioSender> audio_snapshot;
-        std::optional<AncillarySender> ancillary_snapshot;
-        CallbackDispatcher::SenderCallbacks callbacks;
-
-        {
-          std::lock_guard<std::mutex> sender_lock(ctx.sender_mutex);
-          const auto sender_id = utility::us2s(resource.id);
-          VideoSender *video =
-              ctx.stream_store.find_video_sender_by_sender_id(sender_id);
-          AudioSender *audio =
-              ctx.stream_store.find_audio_sender_by_sender_id(sender_id);
-          AncillarySender *ancillary =
-              ctx.stream_store.find_ancillary_sender_by_sender_id(sender_id);
-
-          fill_snapshot(video, source_ip, destination_ip, dest_port);
-          if (video && video->redundancy.present && has_secondary_transport_param)
-          {
-            video->redundancy.enable = redundancy_enable;
-            video->redundancy.source_ip = source_ip_07;
-            video->redundancy.ip = destination_ip_07;
-            video->redundancy.port = dest_port_07;
-          }
-          video_snapshot = video ? std::optional(*video) : std::nullopt;
-
-          fill_snapshot(audio, source_ip, destination_ip, dest_port);
-          if (audio && audio->redundancy.present && has_secondary_transport_param)
-          {
-            audio->redundancy.enable = redundancy_enable;
-            audio->redundancy.source_ip = source_ip_07;
-            audio->redundancy.ip = destination_ip_07;
-            audio->redundancy.port = dest_port_07;
-          }
-          audio_snapshot = audio ? std::optional(*audio) : std::nullopt;
-
-          fill_snapshot(ancillary, source_ip, destination_ip, dest_port);
-          if (ancillary && ancillary->redundancy.present && has_secondary_transport_param)
-          {
-            ancillary->redundancy.enable = redundancy_enable;
-            ancillary->redundancy.source_ip = source_ip_07;
-            ancillary->redundancy.ip = destination_ip_07;
-            ancillary->redundancy.port = dest_port_07;
-          }
-          ancillary_snapshot = ancillary ? std::optional(*ancillary) : std::nullopt;
-        }
-
-        callbacks = ctx.callbacks.sender_callbacks();
-
-        dispatch_callback(video_snapshot, callbacks.video, "video sender");
-        dispatch_callback(audio_snapshot, callbacks.audio, "audio sender");
-        dispatch_callback(ancillary_snapshot, callbacks.ancillary, "ancillary sender");
       }
 
       if (ec)

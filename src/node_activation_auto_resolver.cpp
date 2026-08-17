@@ -28,7 +28,7 @@ namespace seeder::nmos_node::internal
     struct RuntimeInterfaceLeg
     {
       web::hosts::experimental::host_interface interface;
-      utility::string_t ip;
+      std::string ip;
       bool has_ip = false;
     };
 
@@ -40,7 +40,7 @@ namespace seeder::nmos_node::internal
 
     RuntimeInterfaceLeg make_runtime_interface_leg(
         const web::hosts::experimental::host_interface &interface,
-        const utility::string_t &ip)
+        const std::string &ip)
     {
       return RuntimeInterfaceLeg{interface, ip, true};
     }
@@ -51,19 +51,25 @@ namespace seeder::nmos_node::internal
     {
       if (!configured_ip.empty())
       {
-        const auto it = impl::find_interface(interfaces,
-                                             utility::conversions::to_string_t(configured_ip));
+        const auto it = impl::find_interface(
+            interfaces, utility::conversions::to_string_t(configured_ip));
         if (interfaces.end() != it)
         {
-          return make_runtime_interface_leg(*it,
-                                            utility::conversions::to_string_t(configured_ip));
+          return make_runtime_interface_leg(*it, configured_ip);
         }
-        return make_runtime_interface_leg(interfaces.front(),
-                                          utility::conversions::to_string_t(configured_ip));
+      }
+      for (const auto &interface : interfaces)
+      {
+        if (!interface.addresses.empty())
+        {
+          return make_runtime_interface_leg(
+              interface,
+              utility::conversions::to_utf8string(interface.addresses.front()));
+        }
       }
       if (!interfaces.empty())
       {
-        return make_runtime_interface_leg(interfaces.front(), utility::string_t{});
+        return make_runtime_interface_leg(interfaces.front(), std::string{});
       }
       return RuntimeInterfaceLeg{};
     }
@@ -74,22 +80,26 @@ namespace seeder::nmos_node::internal
     {
       if (!configured_ip.empty())
       {
-        const auto it = impl::find_interface(interfaces,
-                                             utility::conversions::to_string_t(configured_ip));
+        const auto it = impl::find_interface(
+            interfaces, utility::conversions::to_string_t(configured_ip));
         if (interfaces.end() != it)
         {
-          return make_runtime_interface_leg(*it,
-                                            utility::conversions::to_string_t(configured_ip));
+          return make_runtime_interface_leg(*it, configured_ip);
         }
-        return make_runtime_interface_leg(interfaces.front(),
-                                          utility::conversions::to_string_t(configured_ip));
       }
-      if (interfaces.size() > 1)
+      for (const auto &interface : interfaces)
       {
-        const auto &secondary = (interfaces[0].name == primary.interface.name)
-                                    ? interfaces[1]
-                                    : interfaces[0];
-        return make_runtime_interface_leg(secondary, utility::string_t{});
+        if (!interface.addresses.empty() &&
+            (!primary.has_ip || interface.name != primary.interface.name))
+        {
+          return make_runtime_interface_leg(
+              interface,
+              utility::conversions::to_utf8string(interface.addresses.front()));
+        }
+      }
+      if (primary.has_ip)
+      {
+        return primary;
       }
       return select_runtime_interface_leg(interfaces, std::string{});
     }
@@ -195,13 +205,17 @@ namespace seeder::nmos_node::internal
         nmos::details::resolve_auto(transport_params_array[0],
                                     nmos::fields::source_ip,
                                     [&]
-                                    { return value::string(selection.primary.ip); });
+                                    { return value::string(selection.primary.ip.empty()
+                                        ? U("0.0.0.0")
+                                        : selection.primary.ip); });
         if (smpte2022_7 && transport_params_array.size() > 1)
         {
           nmos::details::resolve_auto(transport_params_array[1],
                                       nmos::fields::source_ip,
                                       [&]
-                                      { return value::string(selection.redundancy.ip); });
+                                      { return value::string(selection.redundancy.ip.empty()
+                                          ? U("0.0.0.0")
+                                          : selection.redundancy.ip); });
         }
         nmos::details::resolve_auto(transport_params_array[0],
                                     nmos::fields::destination_ip,
@@ -218,6 +232,14 @@ namespace seeder::nmos_node::internal
       }
       else if (id_type.second == nmos::types::receiver)
       {
+        // 断开连接时无需解析 auto 参数，直接返回避免访问异常的 transport_params
+        const auto master_enable = nmos::fields::master_enable(
+            nmos::fields::endpoint_staged(connection_resource.data));
+        if (!master_enable)
+        {
+          return;
+        }
+
         bool smpte2022_7 = false;
         std::string interface_ip = "";
         std::string secondary_multicast_ip = "";
@@ -280,8 +302,8 @@ namespace seeder::nmos_node::internal
         }
         const auto selection = select_runtime_interfaces(
             interfaces, primary_source_ip, redundancy_source_ip, smpte2022_7);
-        interface_ip = utility::us2s(selection.primary.ip);
-        secondary_interface_ip = utility::us2s(selection.redundancy.ip);
+        interface_ip = selection.primary.ip;
+        secondary_interface_ip = selection.redundancy.ip;
         nmos::details::resolve_auto(transport_params_array[0],
                                     nmos::fields::multicast_ip,
                                     [&]
@@ -294,10 +316,19 @@ namespace seeder::nmos_node::internal
                                     nmos::fields::destination_port,
                                     [&]
                                     { return port; });
-        nmos::details::resolve_auto(
-            transport_params_array[0], nmos::fields::interface_ip,
-            [&]
-            { return value::string(utility::s2us(interface_ip)); });
+        auto &tp0 = transport_params_array[0];
+        if (!tp0.has_field(nmos::fields::interface_ip))
+        {
+          tp0[nmos::fields::interface_ip] =
+              value::string(utility::s2us(interface_ip));
+        }
+        else
+        {
+          nmos::details::resolve_auto(
+              tp0, nmos::fields::interface_ip,
+              [&]
+              { return value::string(utility::s2us(interface_ip)); });
+        }
         if (smpte2022_7 && transport_params_array.size() > 1)
         {
           nmos::details::resolve_auto(
@@ -308,10 +339,19 @@ namespace seeder::nmos_node::internal
               transport_params_array[1], nmos::fields::destination_port,
               [&]
               { return secondary_port; });
-          nmos::details::resolve_auto(
-              transport_params_array[1], nmos::fields::interface_ip,
-              [&]
-              { return value::string(utility::s2us(secondary_interface_ip)); });
+          auto &tp1 = transport_params_array[1];
+          if (!tp1.has_field(nmos::fields::interface_ip))
+          {
+            tp1[nmos::fields::interface_ip] =
+                value::string(utility::s2us(secondary_interface_ip));
+          }
+          else
+          {
+            nmos::details::resolve_auto(
+                tp1, nmos::fields::interface_ip,
+                [&]
+                { return value::string(utility::s2us(secondary_interface_ip)); });
+          }
         }
         nmos::resolve_rtp_auto(id_type.second, transport_params);
       }

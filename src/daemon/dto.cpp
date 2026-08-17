@@ -1,5 +1,6 @@
 #include "../node_types.h"
 #include "dto.h"
+#include "video_format.h"
 
 #include <cpprest/details/basic_types.h>
 
@@ -359,6 +360,7 @@ namespace
     device.enable = get_bool_or(object, "enable", false, path);
     device.id = get_int_or(object, "id", 0, path);
     device.sip = get_string_or(object, "sip", {}, path);
+    device.mac = get_string_or(object, "mac", {}, path);
     return device;
   }
 
@@ -370,6 +372,10 @@ namespace
     object[to_t("enable")] = value::boolean(device.enable);
     object[to_t("id")] = value::number(device.id);
     object[to_t("sip")] = json_string(device.sip);
+    if (!device.mac.empty())
+    {
+      object[to_t("mac")] = json_string(device.mac);
+    }
     return object;
   }
 
@@ -413,11 +419,12 @@ namespace
   }
 
   seeder::nmos_node::VideoSender video_sender_from_json(
-      const value &object, const std::string &path)
+      const value &object, const std::string &path, bool parent_enable = true)
   {
     seeder::nmos_node::VideoSender sender;
     sender.id = get_string_or(object, "id", {}, path);
     sender.name = get_string_or(object, "name", {}, path);
+    sender.parent_enable = parent_enable;
     sender.enable = get_bool_or(object, "enable", false, path);
     sender.video_format = get_string_or(object, "video_format", {}, path);
     sender.colorspace =
@@ -432,6 +439,24 @@ namespace
     {
       sender.redundancy = redundancy_from_json(object.at(to_t("redundancy")),
                                              field_path(path, "redundancy"));
+    }
+    // 为非法参数使用默认值，保证注册不报错
+    if (sender.video_format.empty() ||
+        seeder::core::video_format_desc::get(sender.video_format).is_invalid())
+    {
+      sender.video_format = "1080p50";
+    }
+    if (sender.ip.empty())
+    {
+      sender.ip = "0.0.0.0";
+    }
+    if (sender.source_ip.empty())
+    {
+      sender.source_ip = "0.0.0.0";
+    }
+    if (sender.port == 0)
+    {
+      sender.port = 5000;
     }
     return sender;
   }
@@ -459,11 +484,12 @@ namespace
   }
 
   seeder::nmos_node::AudioSender audio_sender_from_json(
-      const value &object, const std::string &path)
+      const value &object, const std::string &path, bool parent_enable = true)
   {
     seeder::nmos_node::AudioSender sender;
     sender.id = get_string_or(object, "id", {}, path);
     sender.name = get_string_or(object, "name", {}, path);
+    sender.parent_enable = parent_enable;
     sender.enable = get_bool_or(object, "enable", false, path);
     sender.channel_count = get_int_or(object, "channel_count", 0, path);
     sender.bit_depth = get_int_or(object, "bit_depth", 0, path);
@@ -475,6 +501,19 @@ namespace
     {
       sender.redundancy = redundancy_from_json(object.at(to_t("redundancy")),
                                              field_path(path, "redundancy"));
+    }
+    // 为非法参数使用默认值，保证注册不报错
+    if (sender.ip.empty())
+    {
+      sender.ip = "0.0.0.0";
+    }
+    if (sender.port == 0)
+    {
+      sender.port = 5000;
+    }
+    if (sender.source_ip.empty())
+    {
+      sender.source_ip = "0.0.0.0";
     }
     return sender;
   }
@@ -500,12 +539,13 @@ namespace
   }
 
   seeder::nmos_node::AncillarySender ancillary_sender_from_json(
-      const value &object, const std::string &path)
+      const value &object, const std::string &path, bool parent_enable = true)
   {
     seeder::nmos_node::AncillarySender sender;
     sender.id = get_string_or(object, "id", {}, path);
     sender.name = get_string_or(object, "name", {}, path);
     sender.format = get_string_or(object, "format", {}, path);
+    sender.parent_enable = parent_enable;
     sender.enable = get_bool_or(object, "enable", false, path);
     sender.source_ip = get_string_or(object, "source_ip", {}, path);
     sender.ip = get_string_or(object, "ip", {}, path);
@@ -514,6 +554,18 @@ namespace
     {
       sender.redundancy = redundancy_from_json(object.at(to_t("redundancy")),
                                              field_path(path, "redundancy"));
+    }
+    if (sender.ip.empty())
+    {
+      sender.ip = "0.0.0.0";
+    }
+    if (sender.port == 0)
+    {
+      sender.port = 5000;
+    }
+    if (sender.source_ip.empty())
+    {
+      sender.source_ip = "0.0.0.0";
     }
     return sender;
   }
@@ -539,11 +591,12 @@ namespace
   }
 
   seeder::nmos_node::VideoReceiver video_receiver_from_json(
-      const value &object, const std::string &path)
+      const value &object, const std::string &path, bool parent_enable = true)
   {
     seeder::nmos_node::VideoReceiver receiver;
     receiver.id = get_string_or(object, "id", {}, path);
     receiver.name = get_string_or(object, "name", {}, path);
+    receiver.parent_enable = parent_enable;
     receiver.enable = get_bool_or(object, "enable", false, path);
     receiver.source_ip = get_string_or(object, "source_ip", {}, path);
     receiver.ip = get_string_or(object, "ip", {}, path);
@@ -572,6 +625,18 @@ namespace
     receiver.colorspace = get_string_or(object, "colorspace", {}, path);
     receiver.transfer_characteristics =
         get_string_or(object, "transfer_characteristics", {}, path);
+    if (receiver.ip.empty())
+    {
+      receiver.ip = "0.0.0.0";
+    }
+    if (receiver.port == 0)
+    {
+      receiver.port = 5000;
+    }
+    if (receiver.source_ip.empty())
+    {
+      receiver.source_ip = "0.0.0.0";
+    }
     return receiver;
   }
 
@@ -607,11 +672,12 @@ namespace
   }
 
   seeder::nmos_node::AudioReceiver audio_receiver_from_json(
-      const value &object, const std::string &path)
+      const value &object, const std::string &path, bool parent_enable = true)
   {
     seeder::nmos_node::AudioReceiver receiver;
     receiver.id = get_string_or(object, "id", {}, path);
     receiver.name = get_string_or(object, "name", {}, path);
+    receiver.parent_enable = parent_enable;
     receiver.enable = get_bool_or(object, "enable", false, path);
     receiver.channel_count = get_int_or(object, "channel_count", 0, path);
     receiver.bit_depth = get_int_or(object, "bit_depth", 0, path);
@@ -624,6 +690,18 @@ namespace
     {
       receiver.redundancy = redundancy_from_json(object.at(to_t("redundancy")),
                                                field_path(path, "redundancy"));
+    }
+    if (receiver.ip.empty())
+    {
+      receiver.ip = "0.0.0.0";
+    }
+    if (receiver.port == 0)
+    {
+      receiver.port = 5000;
+    }
+    if (receiver.source_ip.empty())
+    {
+      receiver.source_ip = "0.0.0.0";
     }
     return receiver;
   }
@@ -649,12 +727,13 @@ namespace
   }
 
   seeder::nmos_node::AncillaryReceiver ancillary_receiver_from_json(
-      const value &object, const std::string &path)
+      const value &object, const std::string &path, bool parent_enable = true)
   {
     seeder::nmos_node::AncillaryReceiver receiver;
     receiver.id = get_string_or(object, "id", {}, path);
     receiver.name = get_string_or(object, "name", {}, path);
     receiver.format = get_string_or(object, "format", {}, path);
+    receiver.parent_enable = parent_enable;
     receiver.enable = get_bool_or(object, "enable", false, path);
     receiver.source_ip = get_string_or(object, "source_ip", {}, path);
     receiver.ip = get_string_or(object, "ip", {}, path);
@@ -663,6 +742,18 @@ namespace
     {
       receiver.redundancy = redundancy_from_json(object.at(to_t("redundancy")),
                                                field_path(path, "redundancy"));
+    }
+    if (receiver.ip.empty())
+    {
+      receiver.ip = "0.0.0.0";
+    }
+    if (receiver.port == 0)
+    {
+      receiver.port = 5000;
+    }
+    if (receiver.source_ip.empty())
+    {
+      receiver.source_ip = "0.0.0.0";
     }
     return receiver;
   }
@@ -809,19 +900,20 @@ namespace seeder::nmos_sync
     {
       const auto sender_path = index_path("senders", sender_index);
       const auto &sender_object = require_object_value(sender, sender_path);
+      const bool parent_enable = get_bool_or(sender_object, "enable", true, sender_path);
       if (sender_object.has_field(to_t("video")))
       {
         const auto video_path = field_path(sender_path, "video");
         snapshot.video_senders.push_back(video_sender_from_json(
             require_object_value(sender_object.at(to_t("video")), video_path),
-            video_path));
+            video_path, parent_enable));
       }
       if (sender_object.has_field(to_t("audio")))
       {
         const auto audio_path = field_path(sender_path, "audio");
         snapshot.audio_senders.push_back(audio_sender_from_json(
             require_object_value(sender_object.at(to_t("audio")), audio_path),
-            audio_path));
+            audio_path, parent_enable));
       }
       if (sender_object.has_field(to_t("ancillary")))
       {
@@ -829,7 +921,7 @@ namespace seeder::nmos_sync
         snapshot.ancillary_senders.push_back(ancillary_sender_from_json(
             require_object_value(sender_object.at(to_t("ancillary")),
                                  ancillary_path),
-            ancillary_path));
+            ancillary_path, parent_enable));
       }
       ++sender_index;
     }
@@ -839,19 +931,20 @@ namespace seeder::nmos_sync
     {
       const auto receiver_path = index_path("receivers", receiver_index);
       const auto &receiver_object = require_object_value(receiver, receiver_path);
+      const bool parent_enable = get_bool_or(receiver_object, "enable", true, receiver_path);
       if (receiver_object.has_field(to_t("video")))
       {
         const auto video_path = field_path(receiver_path, "video");
         snapshot.video_receivers.push_back(video_receiver_from_json(
             require_object_value(receiver_object.at(to_t("video")), video_path),
-            video_path));
+            video_path, parent_enable));
       }
       if (receiver_object.has_field(to_t("audio")))
       {
         const auto audio_path = field_path(receiver_path, "audio");
         snapshot.audio_receivers.push_back(audio_receiver_from_json(
             require_object_value(receiver_object.at(to_t("audio")), audio_path),
-            audio_path));
+            audio_path, parent_enable));
       }
       if (receiver_object.has_field(to_t("ancillary")))
       {
@@ -859,7 +952,7 @@ namespace seeder::nmos_sync
         snapshot.ancillary_receivers.push_back(ancillary_receiver_from_json(
             require_object_value(receiver_object.at(to_t("ancillary")),
                                  ancillary_path),
-            ancillary_path));
+            ancillary_path, parent_enable));
       }
       ++receiver_index;
     }
@@ -1133,6 +1226,6 @@ if (get_string_or(root, "type") != "connection.validation.result")
     return lhs.device == rhs.device &&
            lhs.display_name == rhs.display_name &&
            lhs.enable == rhs.enable && lhs.id == rhs.id &&
-           lhs.sip == rhs.sip;
+           lhs.sip == rhs.sip && lhs.mac == rhs.mac;
   }
 }

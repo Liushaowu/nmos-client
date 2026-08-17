@@ -474,7 +474,7 @@ namespace seeder::nmos_node::internal
         make_receiver_resources<Tag>(make_resource_factory(), receiver);
     replace_receiver_resources(
         std::string("update ") + MediaTraits<Tag>::name() + " receiver",
-        std::move(resources), receiver.redundancy.present);
+        std::move(resources), true);
     {
       std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
       StoreAccessor<Tag>::replace_receiver(stream_store_, receiver);
@@ -572,7 +572,7 @@ namespace seeder::nmos_node::internal
         std::string("runtime interfaces update ") +
             MediaTraits<Tag>::name() + " sender",
         make_sender_resources<Tag>(make_resource_factory(), item),
-        item.redundancy.present);
+        true);
   }
 
   template <typename Tag>
@@ -583,7 +583,7 @@ namespace seeder::nmos_node::internal
         std::string("runtime interfaces update ") +
             MediaTraits<Tag>::name() + " receiver",
         make_receiver_resources<Tag>(make_resource_factory(), item),
-        item.redundancy.present);
+        true);
   }
 
   // ============================================================
@@ -829,6 +829,38 @@ namespace seeder::nmos_node::internal
             {
               resources.connection_receiver.data[nmos::fields::endpoint_active] =
                   endpoint_active;
+
+              // 将新 staged 中 rtp_enabled 同步到保留的 active 端点
+              auto &preserved_active =
+                  resources.connection_receiver
+                      .data[nmos::fields::endpoint_active];
+              auto &new_staged =
+                  resources.connection_receiver
+                      .data[nmos::fields::endpoint_staged];
+              if (preserved_active.has_field(nmos::fields::transport_params) &&
+                  new_staged.has_field(nmos::fields::transport_params))
+              {
+                auto &active_tp =
+                    preserved_active[nmos::fields::transport_params];
+                auto &staged_tp =
+                    new_staged[nmos::fields::transport_params];
+                if (active_tp.is_array() && staged_tp.is_array())
+                {
+                  auto &active_tp_arr = active_tp.as_array();
+                  auto &staged_tp_arr = staged_tp.as_array();
+                  for (size_t i = 0;
+                       i < active_tp_arr.size() && i < staged_tp_arr.size();
+                       ++i)
+                  {
+                    if (staged_tp_arr[i].has_field(
+                            nmos::fields::rtp_enabled))
+                    {
+                      active_tp_arr[i][nmos::fields::rtp_enabled] =
+                          staged_tp_arr[i][nmos::fields::rtp_enabled];
+                    }
+                  }
+                }
+              }
             }
           }
           connection_receiver = std::move(resources.connection_receiver);

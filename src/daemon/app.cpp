@@ -33,7 +33,7 @@ constexpr const char* kServiceName = "nmos-daemon.service";
 #endif
 constexpr int kRestartDelaySeconds = 2;
 constexpr auto kDaemonRestartCooldown = std::chrono::seconds(60);
-const auto kReceiverConnectionResultTimeout = std::chrono::milliseconds(5);
+const auto kReceiverConnectionResultTimeout = std::chrono::milliseconds(500);
 
 #ifdef _WIN32
 std::string powershell_single_quote(const std::string &value) {
@@ -148,8 +148,8 @@ void apply_mdns_cleanup(web::json::value &settings) {
     return;
   }
 
-  settings.as_object().erase(to_t("registry_address"));
-  settings.as_object().erase(to_t("registration_port"));
+  settings[to_t("registry_address")] = web::json::value::string(to_t(""));
+  settings[to_t("registration_port")] = web::json::value::number(0);
 }
 
 void apply_selected_registry_settings(web::json::value &settings) {
@@ -397,13 +397,8 @@ int App::run() {
   { handle_ws_error(message); };
   ws_client_->set_callbacks(std::move(callbacks));
 
-  set_node_state("starting");
-  if (!node_->start()) {
-    state_store_.mark_sync_failed("failed to start node runtime");
-    set_node_state("stopped");
-    return 1;
-  }
-  set_node_state("running");
+  // Node 仅在 WebSocket 连接建立后启动，初始状态为 stopped
+  set_node_state("stopped");
 
   http_debug_server_->start();
 
@@ -579,6 +574,15 @@ void App::perform_sync(std::int64_t revision, bool is_retry_attempt) {
 }
 
 void App::handle_ws_connected() {
+  // WebSocket 连接建立后启动 NMOS Node
+  if (!node_->start()) {
+    state_store_.mark_sync_failed("failed to start node runtime on ws connect");
+    std::cerr << "nmos-sync-daemon: failed to start node runtime on ws connect"
+              << std::endl;
+    return;
+  }
+  set_node_state("running");
+
   state_store_.set_daemon_state("connected_waiting_snapshot");
   if (state_store_.consume_pending_drain_notification() && ws_client_) {
     ws_client_->send_json(make_streams_drained_message());
@@ -595,6 +599,11 @@ void App::handle_ws_disconnected() {
   reconcile_engine_.drain_all(state_store_.last_snapshot(), *node_);
   state_store_.mark_drained_due_to_ws_disconnect();
   state_store_.clear_last_snapshot();
+
+  // WebSocket 断开后停止 NMOS Node
+  node_->stop();
+  set_node_state("stopped");
+
   state_store_.set_daemon_state("degraded");
 }
 
@@ -649,7 +658,7 @@ void App::handle_receiver_event(const nmos_node::ReceiverEvent &event) {
 void App::validate_receiver_connection(const nmos_node::ReceiverEvent &event) {
   if (!ws_client_ || !ws_client_->is_connected()) {
     throw std::runtime_error(
-        "websocket is not connected while waiting for receiver connection result");
+        "device is not connected while waiting for receiver connection result");
   }
 
   const auto request_id = make_validation_request_id();

@@ -61,12 +61,13 @@ struct SnapshotDto {
     bool enable = false;
     int id = 0;
     std::string sip;
+    std::string mac;
 
     bool operator==(const DeviceDto &other) const {
       return device == other.device &&
              display_name == other.display_name &&
              enable == other.enable && id == other.id &&
-             sip == other.sip;
+             sip == other.sip && mac == other.mac;
     }
   };
 

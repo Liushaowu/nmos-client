@@ -75,13 +75,20 @@ void set_label_description(nmos::resource &resource, const impl::port &port,
 }
 
 void insert_group_hint(nmos::resource &resource, const impl::port &port,
-                       std::string &id, std::string& name) {
-  const auto group_name = utility::s2us(name);
-  const auto role_in_group =
-      resource.type.name + U('/') + port.name + U('/') + utility::s2us(id);
+                       const std::string &group_name, int index /*= 1*/) {
+  // Natural grouping per BCP-002-01
+  // Format: "<group-name>:<role-in-group>"
+  // group_name  = user-defined (e.g. struct.name, "Playout Master")
+  // role_in_group = TitleCase(port.name) + " " + index (e.g. "Video 1")
+  auto role = port.name;
+  role[0] = utility::char_t(toupper(role[0]));
+  for (size_t i = 1; i < role.size(); ++i)
+    role[i] = utility::char_t(tolower(role[i]));
+  role += U(' ') + utility::s2us(std::to_string(index));
+
   web::json::push_back(
       resource.data[nmos::fields::tags][nmos::fields::group_hint],
       nmos::make_group_hint(
-          {group_name, role_in_group, nmos::group_scopes::device}));
+          {utility::s2us(group_name), role, nmos::group_scopes::device}));
 }
 } // namespace impl

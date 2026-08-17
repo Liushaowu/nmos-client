@@ -65,12 +65,23 @@ namespace seeder::nmos_node::internal
     void apply_primary_params(Receiver &receiver,
                               const web::json::array &transport_params)
     {
-      receiver.source_ip = utility::us2s(
-          nmos::fields::interface_ip(transport_params.at(0)).as_string());
-      receiver.ip = utility::us2s(
-          nmos::fields::multicast_ip(transport_params.at(0)).as_string());
-      receiver.port =
-          nmos::fields::destination_port(transport_params.at(0)).as_integer();
+      auto safe_str = [](const web::json::value &tp,
+                         const utility::string_t &field) -> std::string
+      {
+        if (!tp.is_object() || !tp.has_field(field)) return {};
+        const auto &val = tp.at(field);
+        if (val.is_string()) return utility::us2s(val.as_string());
+        return {};
+      };
+      receiver.source_ip =
+          safe_str(transport_params.at(0), nmos::fields::interface_ip);
+      receiver.ip =
+          safe_str(transport_params.at(0), nmos::fields::multicast_ip);
+      receiver.port = transport_params.at(0).is_object() &&
+                              transport_params.at(0).has_field(nmos::fields::destination_port) &&
+                              transport_params.at(0).at(nmos::fields::destination_port).is_integer()
+                          ? transport_params.at(0).at(nmos::fields::destination_port).as_integer()
+                          : 0;
     }
 
     template <typename Receiver>
@@ -79,13 +90,25 @@ namespace seeder::nmos_node::internal
                                 bool redundancy_enable)
     {
       if (!receiver.redundancy.present || transport_params.size() < 2) return;
+      auto safe_str = [](const web::json::value &tp,
+                         const utility::string_t &field) -> std::string
+      {
+        if (!tp.is_object() || !tp.has_field(field)) return {};
+        const auto &val = tp.at(field);
+        if (val.is_string()) return utility::us2s(val.as_string());
+        return {};
+      };
       receiver.redundancy.enable = redundancy_enable;
-      receiver.redundancy.source_ip = utility::us2s(
-          nmos::fields::interface_ip(transport_params.at(1)).as_string());
-      receiver.redundancy.ip = utility::us2s(
-          nmos::fields::multicast_ip(transport_params.at(1)).as_string());
+      receiver.redundancy.source_ip =
+          safe_str(transport_params.at(1), nmos::fields::interface_ip);
+      receiver.redundancy.ip =
+          safe_str(transport_params.at(1), nmos::fields::multicast_ip);
       receiver.redundancy.port =
-          nmos::fields::destination_port(transport_params.at(1)).as_integer();
+          transport_params.at(1).is_object() &&
+                  transport_params.at(1).has_field(nmos::fields::destination_port) &&
+                  transport_params.at(1).at(nmos::fields::destination_port).is_integer()
+              ? transport_params.at(1).at(nmos::fields::destination_port).as_integer()
+              : 0;
     }
 
     // single template for all 3 receiver types; SDP update dispatched via if constexpr

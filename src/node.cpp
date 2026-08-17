@@ -31,7 +31,9 @@
 #include "node_server_runtime.h"
 #include "node_settings.h"
 #include "node_stream_store.h"
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -135,7 +137,7 @@ namespace seeder
             runtime_interface_updater_(internal::NodeRuntimeInterfaceUpdaterContext{
                 runtime_interfaces_, runtime_interfaces_mutex_, stream_store_,
                 sender_mutex_, receiver_mutex_, node_model_, set_transportfile,
-                resource_controller_}),
+                resource_controller_, node_id_, &gate_}),
             ptp_clock_updater_(internal::NodePtpClockUpdaterContext{
                 node_model_, stream_store_, node_id_, ptp_domain_number_,
                 set_transportfile, gate_}),
@@ -372,8 +374,20 @@ namespace seeder
         }
         const auto node_host_interfaces =
             internal::friendly_named_host_interfaces(host_interfaces);
-        const auto interfaces =
+        auto interfaces =
             nmos::experimental::node_interfaces(node_host_interfaces);
+
+        // 将 chassis_id 和 port_id 强制转为小写，并将冒号替换为连字符（NMOS 规范要求）
+        for (auto &entry : interfaces)
+        {
+          auto normalize_mac = [](utility::string_t &s) {
+            std::transform(s.begin(), s.end(), s.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+            std::replace(s.begin(), s.end(), U(':'), U('-'));
+          };
+          normalize_mac(entry.second.chassis_id);
+          normalize_mac(entry.second.port_id);
+        }
 
 
         // example node
