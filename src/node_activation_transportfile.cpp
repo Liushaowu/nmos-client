@@ -70,8 +70,9 @@ namespace seeder::nmos_node::internal
           for (const auto &transport_param : transport_params.as_array())
           {
             transportfile_transport_params[leg] =
-                NodeSdpService::transport_param_with_valid_destination_ip(
-                    transport_param);
+                NodeSdpService::transport_param_with_valid_source_ip(
+                    NodeSdpService::transport_param_with_valid_destination_ip(
+                        transport_param));
             ++leg;
           }
         }

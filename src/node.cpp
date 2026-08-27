@@ -145,7 +145,12 @@ namespace seeder
                 thread_, node_model_, gate_, lifecycle_mutex_, thread_mutex_,
                 lifecycle_cv_, stop_requested_, lifecycle_state_,
                 needs_model_reset_, [this] { reset_model_state(); },
-                [this] { return nmos_node_start(); }})
+                [this]
+                {
+                  int result = nmos_node_start();
+                  gate_ = nullptr;
+                  return result;
+                }})
       {
       }
       ~Impl() { stop(); }

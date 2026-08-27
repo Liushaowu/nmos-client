@@ -13,6 +13,9 @@ namespace seeder::nmos_node::internal
     static web::json::value transport_param_with_valid_destination_ip(
         const web::json::value &transport_param);
 
+    static web::json::value transport_param_with_valid_source_ip(
+        const web::json::value &transport_param);
+
     static bool transport_param_rtp_enabled(
         const web::json::value &transport_param,
         bool fallback);

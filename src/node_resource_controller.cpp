@@ -248,6 +248,14 @@ namespace seeder::nmos_node::internal
     const auto flow_id   = resources.flow.id;
     const auto sender_id = resources.sender.id;
 
+    // 将 sender 提前加入 stream_store，确保 auto_resolver 能查到
+    // 若资源插入失败，需要回滚（remove）
+    sender.sender_id = utility::us2s(sender_id);
+    {
+      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+      StoreAccessor<Tag>::add_sender(stream_store_, std::move(sender));
+    }
+
     lifecycle_service().erase_sender_resources_if_present(sender_id, source_id,
                                                           flow_id);
 
@@ -257,6 +265,12 @@ namespace seeder::nmos_node::internal
         *gate_, lock);
     if (insert_result != ResourceInsertResult::success)
     {
+      // 回滚：资源插入失败，从 stream_store 移除已添加的 sender
+      {
+        std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+        StoreAccessor<Tag>::remove_sender(stream_store_,
+                                          utility::us2s(sender_id));
+      }
       const auto *name = MediaTraits<Tag>::name();
       if (insert_result == ResourceInsertResult::source_failed)
         throw node_implementation_init_exception(
@@ -270,11 +284,7 @@ namespace seeder::nmos_node::internal
       throw node_implementation_init_exception(
           std::string("add ") + name + " sender connection failed!");
     }
-    sender.sender_id = utility::us2s(sender_id);
-    {
-      std::lock_guard<std::mutex> sender_lock(sender_mutex_);
-      StoreAccessor<Tag>::add_sender(stream_store_, std::move(sender));
-    }
+
     stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
     nmos::modify_resource(
         node_model_.node_resources, device_id_,
@@ -389,6 +399,14 @@ namespace seeder::nmos_node::internal
         make_receiver_resources<Tag>(make_resource_factory(), receiver);
     const auto receiver_id = resources.receiver.id;
 
+    // 将 receiver 提前加入 stream_store，确保 auto_resolver 能查到
+    // 若资源插入失败，需要回滚（remove）
+    {
+      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+      StoreAccessor<Tag>::add_receiver(stream_store_, std::move(receiver),
+                                       receiver_id);
+    }
+
     lifecycle_service().erase_receiver_resources_if_present(receiver_id);
 
     const auto insert_result =
@@ -397,6 +415,11 @@ namespace seeder::nmos_node::internal
             std::move(resources.connection_receiver), *gate_, lock);
     if (insert_result != ResourceInsertResult::success)
     {
+      // 回滚：资源插入失败，从 stream_store 移除已添加的 receiver
+      {
+        std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
+        StoreAccessor<Tag>::remove_receiver(stream_store_, receiver_id);
+      }
       const auto *name = MediaTraits<Tag>::name();
       if (insert_result == ResourceInsertResult::receiver_failed)
         throw node_implementation_init_exception(
@@ -404,11 +427,7 @@ namespace seeder::nmos_node::internal
       throw node_implementation_init_exception(
           std::string("add ") + name + " receiver connection failed!");
     }
-    {
-      std::lock_guard<std::mutex> receiver_lock(receiver_mutex_);
-      StoreAccessor<Tag>::add_receiver(stream_store_, std::move(receiver),
-                                       receiver_id);
-    }
+
     stream_store_.add_receiver_id(receiver_id);
     nmos::modify_resource(
         node_model_.node_resources, device_id_,
@@ -517,23 +536,29 @@ namespace seeder::nmos_node::internal
 
     auto resources =
         make_sender_resources<Tag>(make_resource_factory(), item);
-    const auto insert_result = lifecycle_service().insert_sender_resources_after(
-        0, std::move(resources.source), std::move(resources.flow),
-        std::move(resources.sender), std::move(resources.connection_sender),
-        *gate_, lock);
-    if (insert_result != ResourceInsertResult::success)
-    {
-      throw node_implementation_init_exception(
-          std::string("rebuild ") + MediaTraits<Tag>::name() +
-          " sender resources failed!");
-    }
-
     auto rebuilt = item;
     rebuilt.sender_id = utility::us2s(sender_id);
     {
       std::lock_guard<std::mutex> sender_lock(sender_mutex_);
       StoreAccessor<Tag>::add_sender(stream_store_, std::move(rebuilt));
     }
+
+    const auto insert_result = lifecycle_service().insert_sender_resources_after(
+        0, std::move(resources.source), std::move(resources.flow),
+        std::move(resources.sender), std::move(resources.connection_sender),
+        *gate_, lock);
+    if (insert_result != ResourceInsertResult::success)
+    {
+      {
+        std::lock_guard<std::mutex> sender_lock(sender_mutex_);
+        StoreAccessor<Tag>::remove_sender(stream_store_,
+                                          utility::us2s(sender_id));
+      }
+      throw node_implementation_init_exception(
+          std::string("rebuild ") + MediaTraits<Tag>::name() +
+          " sender resources failed!");
+    }
+
     stream_store_.add_sender_resource_ids(sender_id, source_id, flow_id);
     nmos::modify_resource(
         node_model_.node_resources, device_id_,

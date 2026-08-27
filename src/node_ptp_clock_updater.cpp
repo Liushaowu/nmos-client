@@ -97,10 +97,13 @@ namespace seeder::nmos_node::internal
     ptp_domain_number_ = 0 <= ptp_domain && ptp_domain <= 127 ? ptp_domain : 127;
     if (is_valid_ptp_gmid(normalized_gmid))
     {
-      slog::log<slog::severities::info>(*gate_, SLOG_FLF)
-          << "Setting PTP clock GMID to " << normalized_gmid
-          << " and locked to " << locked
-          << " with domain number " << ptp_domain_number_;
+      if (gate_)
+      {
+        slog::log<slog::severities::info>(*gate_, SLOG_FLF)
+            << "Setting PTP clock GMID to " << normalized_gmid
+            << " and locked to " << locked
+            << " with domain number " << ptp_domain_number_;
+      }
       nmos::modify_resource(
           node_model_.node_resources, node_id_, [&](nmos::resource &node)
           {
@@ -131,12 +134,15 @@ namespace seeder::nmos_node::internal
                                   connection_sender.data[nmos::fields::endpoint_transportfile];
                               set_transportfile_(*sender, connection_sender,
                                                  endpoint_transportfile);
-                              std::string transportfile_json =
-                                  utility::conversions::to_utf8string(
-                                      endpoint_transportfile.serialize());
-                              slog::log<slog::severities::info>(*gate_, SLOG_FLF)
-                                  << "Updated transportfile for sender "
-                                  << sender_id << ": " << transportfile_json;
+                              if (gate_)
+                              {
+                                std::string transportfile_json =
+                                    utility::conversions::to_utf8string(
+                                        endpoint_transportfile.serialize());
+                                slog::log<slog::severities::info>(*gate_, SLOG_FLF)
+                                    << "Updated transportfile for sender "
+                                    << sender_id << ": " << transportfile_json;
+                              }
                             });
     }
   }

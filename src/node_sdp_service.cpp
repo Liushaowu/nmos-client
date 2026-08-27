@@ -102,6 +102,32 @@ namespace seeder::nmos_node::internal
     return sanitized;
   }
 
+  web::json::value NodeSdpService::transport_param_with_valid_source_ip(
+      const web::json::value &transport_param)
+  {
+    auto sanitized = transport_param;
+    if (!sanitized.is_object())
+    {
+      return sanitized;
+    }
+
+    if (!sanitized.has_field(nmos::fields::source_ip))
+    {
+      sanitized[nmos::fields::source_ip] =
+          web::json::value::string(U("0.0.0.0"));
+      return sanitized;
+    }
+
+    const auto &source_ip = sanitized.at(nmos::fields::source_ip);
+    if (!source_ip.is_string() ||
+        !is_valid_ip_literal(to_utf8_string(source_ip.as_string())))
+    {
+      sanitized[nmos::fields::source_ip] =
+          web::json::value::string(U("0.0.0.0"));
+    }
+    return sanitized;
+  }
+
   bool NodeSdpService::transport_param_rtp_enabled(
       const web::json::value &transport_param,
       const bool fallback)
