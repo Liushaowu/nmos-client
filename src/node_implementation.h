@@ -93,13 +93,13 @@ const web::json::field_as_string_or transfer_characteristic{
 DEFINE_STRING_ENUM(port)
 namespace ports {
 // video/raw, video/jxsv, etc.
-const port video{U("VIDEO")};
+const port video{U("video")};
 // audio/L24
-const port audio{U("AUDIO")};
+const port audio{U("audio")};
 // video/smpte291
-const port data{U("DATA")};
+const port data{U("ancillary")};
 // video/SMPTE2022-6
-const port mux{U("MUX")};
+const port mux{U("mux")};
 
 // example measurement event
 const port temperature{U("t")};
