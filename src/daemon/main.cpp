@@ -14,6 +14,7 @@ void handle_signal(int) { g_stop_requested = true; }
 }
 
 int main(int argc, char **argv) {
+  printf("nmos-sync-daemon starting with config: %s\n", argc > 1 ? argv[1] : "daemon_config.json");
   const std::string config_path =
       argc > 1 ? argv[1] : "daemon_config.json";
 
@@ -23,7 +24,7 @@ int main(int argc, char **argv) {
   try {
     seeder::nmos_sync::App app(config_path);
     std::thread runner([&app]() { app.run(); });
-
+    printf("nmos-sync-daemon started, waiting for stop signal...\n");
     while (!g_stop_requested.load()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }

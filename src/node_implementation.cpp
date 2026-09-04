@@ -61,16 +61,23 @@ void set_label_description(nmos::resource &resource, const impl::port &port,
                            std::string &name) {
   using web::json::value;
 
+  // 将 resource.type.name 映射为简短标识
+  auto type_label = resource.type.name;
+  if (type_label == U("sender"))
+    type_label = U("tx");
+  else if (type_label == U("receiver"))
+    type_label = U("rx");
+
   auto label = nmos::fields::label(resource.data);
   if (!label.empty())
     label += U('/');
-  label += resource.type.name + U('/') + port.name + U('/') + utility::s2us(name);
+  label += type_label + U('/') + port.name + U('/') + utility::s2us(name);
   resource.data[nmos::fields::label] = value::string(label);
 
   auto description = nmos::fields::description(resource.data);
   if (!description.empty())
     description += U('/');
-  description += resource.type.name + U('/') + port.name + U('/') + utility::s2us(name);
+  description += type_label + U('/') + port.name + U('/') + utility::s2us(name);
   resource.data[nmos::fields::description] = value::string(description);
 }
 

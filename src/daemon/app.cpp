@@ -355,6 +355,7 @@ void App::restart_node_runtime() {
 }
 
 int App::run() {
+  printf("nmos-sync-daemon starting with config: %s\n", config_path_.c_str());
   config_ = DaemonConfig::load_from_file(config_path_);
 
   state_store_.set_daemon_state("starting");
