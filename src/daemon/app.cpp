@@ -251,6 +251,52 @@ web::json::value App::network_interfaces_json() const {
   return node_->network_interfaces_json();
 }
 
+web::json::value App::registry_senders_json(const SenderQuery &query) const {
+  std::string query_url;
+  {
+    std::lock_guard<std::mutex> lock(node_config_mutex_);
+    const auto registry = state_store_.registry_status();
+    if (!node_ || !registry.connected || registry.uri.empty())
+      throw RegistryUnavailable("node is not connected to a registry");
+    const auto settings = node_->effective_settings();
+    // Explicit override supports deployments with Query and Registration on
+    // different hosts, or without DNS-SD advertisements.
+    query_url = get_string_or_empty(settings, "registry_query_url");
+    if (query_url.empty()) {
+      const web::uri current(to_t(registry.uri));
+      auto services = web::json::value::array();
+      try {
+        services = node_->discover_query_apis();
+      } catch (const std::exception &error) {
+        std::cerr << "Query API discovery failed, trying current registry origin: "
+                  << error.what() << std::endl;
+      }
+      for (const auto &service : services.as_array()) {
+        const auto uri = web::uri(service.at(to_t("uri")).as_string());
+        if (uri.host() == current.host()) {
+          query_url = to_utf8(uri.to_string());
+          break;
+        }
+      }
+      if (query_url.empty()) {
+        // Common single-origin deployments. A separate Query port is discovered
+        // above, never guessed from the Registration port.
+        auto path = to_utf8(current.path());
+        const auto registration = path.rfind("/x-nmos/registration");
+        if (registration == std::string::npos)
+          throw RegistryUnavailable("cannot resolve current registry Query API; configure registry_query_url");
+        auto version = registry.version;
+        if (version.empty()) version = get_string_or_empty(settings, "registry_version");
+        if (version.empty()) version = "v1.3";
+        path.replace(registration, std::string::npos, "/x-nmos/query/" + version);
+        query_url = to_utf8(web::uri_builder(current).set_path(to_t(path)).set_query(U("")).to_string());
+      }
+    }
+  }
+  // Do not hold the runtime/configuration lock during registry or SDP requests.
+  return RegistryClient(query_url).senders(query);
+}
+
 web::json::value App::update_node_config(const web::json::value &patch,
                                          bool replace_entire_document) {
   if (!node_) {

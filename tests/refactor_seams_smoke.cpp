@@ -6,6 +6,8 @@
 #include "daemon/ws_client.h"
 #include "node_sdp_service.h"
 #include "node_server_runtime.h"
+#include "node_settings.h"
+#include "node_implementation.h"
 #include "node_stream_store.h"
 
 #include <cassert>
@@ -147,6 +149,63 @@ namespace
   {
     internal::NodeServerRuntime::log_stop_elapsed(
         std::chrono::steady_clock::now(), "smoke");
+  }
+
+  void check_discovered_query_api_includes_selected_version()
+  {
+    for (const auto *base : {"http://127.0.0.1:3211/x-nmos/query",
+                             "http://127.0.0.1:3211/x-nmos/query/"})
+    {
+      const nmos::experimental::resolved_service service{
+          {nmos::is04_versions::v1_3, 100},
+          web::uri(utility::conversions::to_string_t(base))};
+      const auto query = internal::query_api_to_json(service);
+      assert(query.at(U("uri")).as_string() == U("http://127.0.0.1:3211/x-nmos/query/v1.3"));
+      assert(query.at(U("version")).as_string() == U("v1.3"));
+      // Existing registration discovery continues to expose its base URI.
+      assert(internal::registration_api_to_json(service).at(U("uri")).as_string() ==
+             utility::conversions::to_string_t(base));
+    }
+  }
+
+  void check_runtime_initialization_failures_do_not_report_running()
+  {
+    for (const auto &seed : {std::string("not-a-uuid"),
+                             std::string("717ef3f9-c0c0-4445-b3aa-3327459a0e73")})
+    {
+      nmos::node_model model;
+      internal::NodeSettings settings(
+          "{\"seed_id\":\"" + seed +
+          "\",\"host_address\":\"127.0.0.1\",\"host_addresses\":[\"127.0.0.1\"]}");
+      nmos::experimental::log_gate *gate = nullptr;
+      std::mutex mutex;
+      std::condition_variable cv;
+      std::atomic<internal::LifecycleState> state{internal::LifecycleState::starting};
+      bool stop_requested = false;
+      bool initialized = false;
+      bool thread_started = false;
+      internal::NodeServerRuntime::ServerContext ctx{
+          model, settings, gate, mutex, state, cv, stop_requested};
+      nmos::experimental::node_implementation implementation;
+      const auto result = internal::NodeServerRuntime::start(
+          ctx,
+          [&] {
+            initialized = true;
+            assert(internal::LifecycleState::starting == state);
+            // The business UUID from the production log is only part of the
+            // name; the configured seed is the UUID namespace being parsed.
+            const auto receiver = impl::make_id(
+                utility::conversions::to_string_t(seed), nmos::types::receiver,
+                impl::ports::audio, "d2066b47-d821-4d08-8e5b-d91f827503b0");
+            assert(!receiver.empty());
+            throw std::runtime_error("simulated resource initialization failure");
+          },
+          [&] { thread_started = true; }, implementation);
+      assert(0 != result);
+      assert(initialized == (seed != "not-a-uuid"));
+      assert(!thread_started);
+      assert(internal::LifecycleState::stopped == state);
+    }
   }
 
   void check_connection_result_dto()
@@ -717,6 +776,8 @@ int main()
   check_sdp_transport_helpers();
   check_connection_handler_helpers();
   check_runtime_helper_linkage();
+  check_discovered_query_api_includes_selected_version();
+  check_runtime_initialization_failures_do_not_report_running();
   check_connection_result_dto();
   check_connection_result_waiter();
   check_ws_client_wait_requires_connected_socket();

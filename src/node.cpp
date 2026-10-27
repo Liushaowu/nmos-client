@@ -295,7 +295,7 @@ namespace seeder
             stop_requested_};
         auto node_impl = make_node_implementation();
         return internal::NodeServerRuntime::start(
-            ctx, [this] { thread_run(); }, node_impl);
+            ctx, [this] { init(); }, [this] { thread_run(); }, node_impl);
       }
       bool start()
       {
@@ -308,7 +308,6 @@ namespace seeder
             *gate_, nmos::stash_category(impl::categories::node_implementation)};
         try
         {
-          init();
           node_implementation_run();
         }
         catch (const node_implementation_init_exception &)
@@ -717,6 +716,11 @@ namespace seeder
         return internal::network_interfaces_json();
       }
 
+      NodeSettingsJson discover_query_apis() const
+      {
+        return settings_.discover_query_apis(effective_settings(), *gate_);
+      }
+
       void write_persisted_settings(const NodeSettingsJson &settings)
       {
         settings_.write_persisted_settings(settings);
@@ -910,6 +914,10 @@ namespace seeder
     NodeSettingsJson Node::network_interfaces_json() const
     {
       return p_impl->network_interfaces_json();
+    }
+    NodeSettingsJson Node::discover_query_apis() const
+    {
+      return p_impl->discover_query_apis();
     }
     void Node::write_persisted_settings(const NodeSettingsJson &settings)
     {

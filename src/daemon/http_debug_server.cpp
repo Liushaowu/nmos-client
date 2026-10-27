@@ -250,6 +250,19 @@ void HttpDebugServer::handle_get(web::http::http_request request) {
     }
     return;
   }
+  if (path == to_t("/api/nmos/senders")) {
+    try {
+      const auto query = SenderQuery::parse(request.relative_uri().query());
+      request.reply(web::http::status_codes::OK, app_.registry_senders_json(query));
+    } catch (const std::invalid_argument &error) {
+      request.reply(web::http::status_codes::BadRequest, error_json(error.what()));
+    } catch (const RegistryUnavailable &error) {
+      request.reply(web::http::status_codes::ServiceUnavailable, error_json(error.what()));
+    } catch (const std::exception &error) {
+      request.reply(web::http::status_codes::BadGateway, error_json(error.what()));
+    }
+    return;
+  }
   if (path == to_t("/api/nmos/interfaces")) {
     try {
       request.reply(web::http::status_codes::OK, app_.network_interfaces_json());

@@ -13,6 +13,7 @@
 #endif
 #include <cpprest/basic_utils.h>
 #include <cpprest/asyncrt_utils.h>
+#include <cpprest/uri_builder.h>
 #include <mdns/service_discovery.h>
 #include <nmos/mdns.h>
 #include <nmos/version.h>
@@ -465,6 +466,21 @@ namespace seeder::nmos_node::internal
     return object;
   }
 
+  web::json::value query_api_to_json(
+      const nmos::experimental::resolved_service &service)
+  {
+    auto result = registration_api_to_json(service);
+    // resolve_service_ returns the API base URI with version metadata separate.
+    // Unlike resolve_service, it does not append the selected version itself.
+    auto path = service.second.path();
+    while (!path.empty() && path.back() == U('/')) path.pop_back();
+    const auto uri = web::uri_builder(service.second)
+        .set_path(path + U('/') + nmos::make_api_version(service.first.first))
+        .to_uri();
+    result[U("uri")] = web::json::value::string(uri.to_string());
+    return result;
+  }
+
   web::json::value network_interfaces_json()
   {
     auto interfaces = enumerate_network_interfaces();
@@ -543,6 +559,19 @@ namespace seeder::nmos_node::internal
     {
       result[index++] = registration_api_to_json(service);
     }
+    return result;
+  }
+
+  web::json::value NodeSettings::discover_query_apis(
+      const web::json::value &settings, slog::base_gate &gate) const
+  {
+    mdns::service_discovery discovery(gate);
+    auto services = nmos::experimental::resolve_service_(
+                        discovery, nmos::service_types::query, settings).get();
+    auto result = web::json::value::array();
+    std::size_t index = 0;
+    for (const auto &service : services)
+      result[index++] = query_api_to_json(service);
     return result;
   }
 }

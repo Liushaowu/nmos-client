@@ -43,6 +43,7 @@ namespace seeder::nmos_node::internal
     };
 
     static int start(ServerContext &ctx,
+                     std::function<void()> initialize_fn,
                      std::function<void()> thread_run_fn,
                      nmos::experimental::node_implementation &node_impl);
 

@@ -3,6 +3,7 @@
 #include "../node.h"
 #include "config.h"
 #include "reconcile_engine.h"
+#include "registry_client.h"
 #include "snapshot_client.h"
 #include "state_store.h"
 #include "ws_client.h"
@@ -30,6 +31,7 @@ public:
   void request_stop();
   web::json::value node_settings_json() const;
   web::json::value available_registries_json() const;
+  web::json::value registry_senders_json(const SenderQuery &query) const;
   web::json::value network_interfaces_json() const;
   web::json::value update_node_config(const web::json::value &patch,
                                        bool replace_entire_document);

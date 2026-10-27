@@ -19,6 +19,8 @@ namespace seeder::nmos_node::internal
       const std::vector<web::hosts::experimental::host_interface> &interfaces);
   web::json::value registration_api_to_json(
       const nmos::experimental::resolved_service &service);
+  web::json::value query_api_to_json(
+      const nmos::experimental::resolved_service &service);
   web::json::value network_interfaces_json();
 
   class NodeSettings
@@ -33,6 +35,8 @@ namespace seeder::nmos_node::internal
     web::json::value persisted_settings() const;
     void write_persisted_settings(const web::json::value &settings) const;
     web::json::value discover_registration_apis(
+        const web::json::value &settings, slog::base_gate &gate) const;
+    web::json::value discover_query_apis(
         const web::json::value &settings, slog::base_gate &gate) const;
 
   private:

@@ -15,6 +15,7 @@
 #include <cpprest/http_msg.h>
 #include <cpprest/json.h>
 #include <cpprest/ws_client.h>
+#include <boost/uuid/string_generator.hpp>
 
 #include <fstream>
 #include <iostream>
@@ -34,6 +35,7 @@ namespace seeder::nmos_node::internal
   }
 
   int NodeServerRuntime::start(ServerContext &ctx,
+                               std::function<void()> initialize_fn,
                                std::function<void()> thread_run_fn,
                                nmos::experimental::node_implementation &node_impl)
   {
@@ -80,6 +82,17 @@ namespace seeder::nmos_node::internal
       }
       nmos::insert_node_default_settings(ctx.node_model.settings);
 
+      const auto seed_id = nmos::experimental::fields::seed_id(ctx.node_model.settings);
+      try
+      {
+        boost::uuids::string_generator{}(seed_id);
+      }
+      catch (const std::exception &)
+      {
+        throw std::runtime_error("invalid node configuration seed_id '" +
+            utility::conversions::to_utf8string(seed_id) + "': expected a UUID");
+      }
+
       // copy to the logging settings
       log_model.settings = ctx.node_model.settings;
 
@@ -110,6 +123,12 @@ namespace seeder::nmos_node::internal
           << "Build settings: " << nmos::get_build_settings_info();
       slog::log<slog::severities::info>(gate, SLOG_FLF)
           << "Initial settings: " << ctx.node_model.settings.serialize();
+
+      // Resource IDs, Node/Device resources and activation callbacks must exist
+      // before opening APIs or reporting running to the daemon's sync loop.
+      // Let initialization exceptions fail start instead of swallowing them in
+      // the background implementation thread.
+      initialize_fn();
 
       // Set up the node server
       auto node_server = nmos::experimental::make_node_server(

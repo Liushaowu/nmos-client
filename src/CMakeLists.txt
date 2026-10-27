@@ -33,6 +33,8 @@ set(NMOS_SYNC_DAEMON_SOURCES
     daemon/config.cpp
     daemon/dto.cpp
     daemon/snapshot_client.cpp
+    daemon/registry_client.cpp
+    daemon/sdp_format.cpp
     daemon/ws_client.cpp
     daemon/reconcile_engine.cpp
     daemon/state_store.cpp

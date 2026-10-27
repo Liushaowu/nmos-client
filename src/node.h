@@ -62,6 +62,7 @@ namespace seeder
       NodeSettingsJson effective_settings() const;
       NodeSettingsJson persisted_settings() const;
       NodeSettingsJson discover_registration_apis() const;
+      NodeSettingsJson discover_query_apis() const;
       NodeSettingsJson network_interfaces_json() const;
       void write_persisted_settings(const NodeSettingsJson &settings);
       void set_runtime_interfaces(RuntimeInterfaces interfaces);
